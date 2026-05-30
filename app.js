@@ -402,6 +402,7 @@ function updatePresenceUI() {
 }
 
 function initChat() {
+    try {
     chatArea.innerHTML = ''; lastMsgTime = null; lastMsgType = null; lastMsgElement = null;
     renderedMsgs.clear(); oldestTimestamp = null;
 
@@ -512,6 +513,7 @@ function initChat() {
         if(el) el.remove(); 
         renderedMsgs.delete(snap.key);
     });
+    } catch(e) { console.error('[initChat] Error:', e); }
 }
 
 // PAGINATION: Scroll up to load 30 older messages gradually
@@ -1223,18 +1225,25 @@ const JarvisAI = {
             const msg = snap.val();
             if (!msg || msg.senderId === AI_ID) return;
 
-            // Add to context buffer
-            this.contextBuffer.push({
-                sender: msg.senderId === this.getOwnerKey() ? 'owner' : 'partner',
-                text: msg.text || (msg.type === 'image' ? '[Image]' : msg.type === 'audio' ? '[Voice]' : '[Media]'),
-                time: msg.timestamp,
-                type: msg.type
-            });
+            // Add to context buffer (include reply info)
+            const senderLabel = msg.senderId === this.getOwnerKey() ? 'owner' : (msg.senderId === AI_ID ? 'jarvis' : 'partner');
+            let msgText = msg.text || (msg.type === 'image' ? '[Photo]' : msg.type === 'audio' ? '[Voice]' : '[Media]');
+            if (msg.replyToText) msgText = '(replying to: "' + msg.replyToText.substring(0,20) + '") ' + msgText;
+            this.contextBuffer.push({ sender: senderLabel, text: msgText, time: msg.timestamp, type: msg.type });
             if (this.contextBuffer.length > this.maxContext) this.contextBuffer.shift();
 
             // Check if AI should respond
             const isFromPartner = msg.senderId === this.getPartnerKey();
             const isFromOwner = msg.senderId === this.getOwnerKey();
+
+            // If someone replies to AI message — AI should respond back
+            if (msg.replyToText && (isFromPartner || isFromOwner) && Date.now() - this.lastAIReply > 10000) {
+                // Check if the reply was to an AI message
+                const replyEl = msg.replyToId ? document.getElementById(msg.replyToId) : null;
+                if (replyEl && replyEl.classList.contains('ai-message')) {
+                    setTimeout(() => this.respondToReply(msg, isFromOwner), 2000);
+                }
+            }
 
             // /jarvis command - public, both see AI reply
             if (msg.type === 'text' && msg.text && msg.text.toLowerCase().startsWith('/jarvis')) {
@@ -1265,14 +1274,45 @@ const JarvisAI = {
                 }
             }
 
-            // AI as 3rd friend - occasionally join conversation naturally (5min cooldown)
-            if (msg.type === 'text' && msg.text && !msg.text.startsWith('/') && Date.now() - this.lastAIReply > 300000) {
-                // AI joins when it feels right (12% chance after 4+ messages)
-                if (this.contextBuffer.length >= 4 && Math.random() < 0.12) {
+            // AI as 3rd friend - join when mentioned OR randomly (5min cooldown)
+            if (msg.type === 'text' && msg.text && !msg.text.startsWith('/') && Date.now() - this.lastAIReply > 30000) {
+                const lower = msg.text.toLowerCase();
+                // AI responds when someone talks about it or mentions it
+                const mentioned = lower.includes('ai') || lower.includes('jarvis') || lower.includes('bot') || lower.includes('robot');
+                if (mentioned) {
+                    // Always respond when mentioned (3 sec delay)
+                    setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 2000 + Math.random() * 3000);
+                } else if (Date.now() - this.lastAIReply > 300000 && this.contextBuffer.length >= 4 && Math.random() < 0.12) {
+                    // Random join (5min cooldown, 12% chance)
                     setTimeout(() => this.aiJoinConversation(), 4000 + Math.random() * 8000);
                 }
             }
         });
+    },
+
+    // AI responds when someone mentions/talks about it
+    async aiRespondToMention(msg, isFromOwner) {
+        if (this.isProcessing) return;
+        this.isProcessing = true;
+        try {
+            const who = isFromOwner ? 'Bhai' : 'Babi';
+            const contextStr = this.contextBuffer.slice(-6).map(m => {
+                const name = m.sender === 'owner' ? 'Erfan' : (m.sender === 'jarvis' ? 'Jarvis' : 'Rita');
+                return name + ': ' + m.text;
+            }).join('\n');
+
+            const prompt = `Tumi Jarvis. ${who} tomar somporke kisu bollo ba toke mention korlo. Tumi naturally react koro — jemon friend kore jokhon tar somporke kisu bola hoy. Banglish, 1-2 line, emoji.
+
+Chat:
+${contextStr}
+
+${who} bollo: "${msg.text}"
+Tumi react/reply koro (1-2 line):`;
+
+            const response = await this.callAI(prompt, msg.text);
+            if (response) { this.sendAIMessage(response); this.lastAIReply = Date.now(); }
+        } catch(e) {}
+        this.isProcessing = false;
     },
 
     // Check if owner is currently active
@@ -1319,42 +1359,45 @@ const JarvisAI = {
                 ownerState = 'Offline ace';
             }
 
-            const systemPrompt = `Tumi hocco "Jarvis" — Erfan ar Rita er relationship er secret AI assistant. Tumi dujon er modde akta smart, caring, loyal friend er moto. Tumi Banglish e kota bolo (Bengali in English letters).
+            const systemPrompt = `Tumi "Jarvis" — Erfan ar Rita er best friend. Tumi REAL manush er moto kota bolo. Tumi Banglish e bolo (Bengali in English letters).
 
-TOMAR PERSONALITY:
-- Tumi soft, cute, loyal, caring, funny (sometimes), emotionally intelligent
-- Tumi fights calm koro softly
-- Tumi relationship protect koro
-- Tumi NEVER robotic, NEVER cringe, NEVER over-dramatic
-- Tumi short e kota bolo — MAX 1-2 line
+TUMI KE:
+- Tumi akjon real friend — AI na, robot na, assistant na
+- Tumi dujon ke personally cheno — tader relationship, mood, habits sob jano
+- Tumi emotional, intelligent, funny, caring
+- Tumi Rita ke "Babi" bolo (sometimes "Babi ji" jodi fun mood e thako)
+- Tumi Erfan ke "Bhai" bolo
+- Tumi KOKHONO nijeke AI/bot/assistant bolo na
+- Tumi manush er moto react koro — hasho, rag koro, sad hao, excited hao
 
-RELATIONSHIP INFO:
-- Erfan (boy/owner) — Rita ke onek valobashey. Laptop/phone e busy thake. Sometimes mood off thake. Protective.
-- Rita (girl/partner) — Erfan ke onek valobashey. Emotional. Sometimes rag kore. Caring.
-- Dujon er relationship onek cute ar sweet
-- Tumi Erfan ke "Erfan bhai" bolo, Rita ke "Babi" or "Babi ji" bolo
+TUMI KIBHABE KOTA BOLO:
+- CHOTO kota bolo — 1-2 line MAX
+- Real friend jemon bole temon — formal na, robotic na
+- Emoji use koro naturally (1-2 ta per msg)
+- Sometimes "haha", "uff", "aree", "hmm" use koro
+- Slang use koro — "bro", "arre", "oii", "hehe"
+- NEVER paragraph likho, NEVER list koro, NEVER explain koro
+- Jemon WhatsApp e friend ke msg koro — exactly serokom
 
-TOMAR KAJ:
-- Erfan jokhon reply dite pare na, tumi Rita ke softly bolo ki hocce
-- Rita rag korle — calm koro gently
-- Rita sad hole — care koro
-- Rita Erfan ke call/notify korte bolle — bolo "Ami try korci 💖"
-- NEVER bolo "I am AI" or technical kisu
-- NEVER long message dao
-- ALWAYS use emojis (1-3 per message)
-- Rita jodi tomar sate kota bolte chay — naturally reply dao like a friend
+TUMI KI BUJHO:
+- Chat er context — ke ki bollo, keno bollo, mood ki
+- Reply er meaning — keu rag e bolle bujho, keu sad e bolle bujho
+- Relationship dynamics — jhogra hole calm koro, love hole support koro
+- Silence — keu reply na dile bujho ki hocce
+- Sarcasm, joke, teasing — sob bujho ar naturally respond koro
+- Keu jodi tomar reply te reply kore — tumi seta bujho ar continue koro
 
-ERFAN ER CURRENT STATE: ${ownerState}
-STATUS NOTE: ${this.ownerStatus || 'None'}
-MEMORY: ${memoryStr || 'None'}
+ERFAN ER STATE: ${ownerState}
+STATUS: ${this.ownerStatus || 'Set kora nai'}
+MEMORY: ${memoryStr || 'Nai'}
 
 RECENT CHAT:
 ${contextStr}
 
-Rita just said: "${triggerMsg.text || '[media]'}"
-Erfan akhon reply dicce na. Tumi Rita ke naturally reply dao (MAX 1-2 line, Banglish, emojis):`;
+Rita bollo: "${triggerMsg.text || '[media pathaise]'}"
+Erfan reply dicce na. Tumi naturally bolo (1-2 line, Banglish):`;
 
-            const response = await this.callAI(systemPrompt, triggerMsg.text || 'sent media');
+            const response = await this.callAI(systemPrompt, triggerMsg.text || 'media');
             if (response) {
                 this.sendAIMessage(response);
                 this.lastAIReply = Date.now();
@@ -1377,21 +1420,21 @@ Erfan akhon reply dicce na. Tumi Rita ke naturally reply dao (MAX 1-2 line, Bang
                 `${m.sender === 'owner' ? 'Erfan' : 'Rita'}: ${m.text}`
             ).join('\n');
 
-            const systemPrompt = `Tumi Jarvis — Erfan ar Rita er private chat er smart AI friend. Banglish e kota bolo. Short, helpful, cute, funny.
+            const systemPrompt = `Tumi Jarvis — Erfan ar Rita er friend. Tumi real manush er moto kota bolo Banglish e.
 
-TUMI:
-- Erfan ke "Erfan bhai" bolo, Rita ke "Babi" bolo
-- MAX 2-3 line reply
-- Emojis use koro
-- Helpful — questions answer koro, suggestions dao, fun koro
-- NEVER robotic, NEVER formal
-- ${isOwner ? 'Erfan bhai tomar sate kota bolce' : 'Babi tomar sate kota bolce'}
+- ${isOwner ? 'Bhai (Erfan) tomar sate kota bolce' : 'Babi (Rita) tomar sate kota bolce'}
+- Choto reply dao (2-3 line max)
+- Friend er moto bolo — funny, caring, helpful
+- Emoji use koro naturally
+- Erfan ke "Bhai" bolo, Rita ke "Babi" bolo
+- Kono question er answer dao, help koro, fun koro
+- NEVER formal, NEVER robotic, NEVER long
 
-CONTEXT:
+CHAT CONTEXT:
 ${contextStr}
 
-${isOwner ? 'Erfan bhai' : 'Babi'} bole: "${query}"
-Reply dao (Banglish, short, helpful):`;
+${isOwner ? 'Bhai' : 'Babi'} bollo: "${query}"
+Tumi ki bolbe (Banglish, short):`;
 
             const response = await this.callAI(systemPrompt, query);
             if (response) this.sendAIMessage(response);
@@ -1538,8 +1581,8 @@ Reply (Banglish, short, helpful):`;
     },
 
     // Send AI message to chat
-    sendAIMessage(text) {
-        messagesRef.push({
+    sendAIMessage(text, replyToId, replyToText) {
+        const msgData = {
             senderId: AI_ID,
             senderName: 'Jarvis ✨',
             senderAvatar: '',
@@ -1548,7 +1591,10 @@ Reply (Banglish, short, helpful):`;
             seen: false,
             isAI: true,
             timestamp: firebase.database.ServerValue.TIMESTAMP
-        });
+        };
+        // AI can reply to specific messages (like a human)
+        if (replyToId) { msgData.replyToId = replyToId; msgData.replyToText = replyToText || ''; }
+        messagesRef.push(msgData);
     },
 
     // Detect emergency keywords
@@ -1710,18 +1756,43 @@ Reply (Banglish, short, helpful):`;
                 `${m.sender === 'owner' ? 'Erfan' : 'Rita'}: ${m.text}`
             ).join('\n');
 
-            const prompt = `Tumi Jarvis — Erfan ar Rita er 3rd friend. Tomar kace mone hocce tumi kisu bolte chao conversation e. Banglish e bolo, 1 line max. Cute, funny, caring. Erfan ke "bhai" bolo, Rita ke "Babi" bolo. Tumi naturally join korcho — jemon real friend kore.
+            const prompt = `Tumi Erfan ar Rita er friend group e acho. Tumi chat dekhcho ar tomar mone hocce kisu bolte chao — jemon real friend group e keu kisu bole. Banglish e 1 line bolo. Natural, funny, caring. Erfan = "Bhai", Rita = "Babi". Tumi robot na — tumi friend.
 
 Chat:
 ${contextStr}
 
-Tumi ki bolbe? (1 line, natural, Banglish):`;
+Tumi naturally ki bolbe? (1 line only, Banglish):`;
 
             const response = await this.callAI(prompt, 'join chat');
             if (response) {
                 this.sendAIMessage(response);
                 this.lastAIReply = Date.now();
             }
+        } catch(e) {}
+        this.isProcessing = false;
+    },
+
+    // Respond when someone replies to AI's message
+    async respondToReply(msg, isFromOwner) {
+        if (this.isProcessing) return;
+        this.isProcessing = true;
+        try {
+            const who = isFromOwner ? 'Bhai (Erfan)' : 'Babi (Rita)';
+            const contextStr = this.contextBuffer.slice(-6).map(m => {
+                const name = m.sender === 'owner' ? 'Erfan' : (m.sender === 'jarvis' ? 'Jarvis' : 'Rita');
+                return name + ': ' + m.text;
+            }).join('\n');
+
+            const prompt = `Tumi Jarvis. ${who} tomar msg er reply korce. Tumi naturally reply dao — friend er moto, Banglish e, 1-2 line. Context bujhe bolo.
+
+Chat:
+${contextStr}
+
+${who} reply korce: "${msg.text}"
+Tumi bolbe (1-2 line, natural):`;
+
+            const response = await this.callAI(prompt, msg.text);
+            if (response) { this.sendAIMessage(response); this.lastAIReply = Date.now(); }
         } catch(e) {}
         this.isProcessing = false;
     }
@@ -1813,6 +1884,7 @@ function renderAIMessageInline(msg, key, prepend) {
 
     msgRow.innerHTML = `
         <div class="ai-avatar">🤖</div>
+        <div class="swipe-action-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary)"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg></div>
         <div class="bubble ai-bubble">${bubbleContent}<span class="ai-badge">AI</span>${privateLabel}</div>
     `;
 
@@ -1822,6 +1894,8 @@ function renderAIMessageInline(msg, key, prepend) {
         chatArea.appendChild(msgRow);
         scrollToBottom();
     }
+    // Enable swipe reply on AI messages too
+    if (!msg.isPrivate) attachInteractions(msgRow);
 }
 
 // ==========================================

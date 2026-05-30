@@ -19,7 +19,7 @@ app/
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    package="com.erfan.calendar">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -33,8 +33,7 @@ app/
         android:label="@string/app_name"
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true"
-        android:theme="@style/AppTheme"
-        tools:targetApi="31">
+        android:theme="@style/AppTheme">
 
         <activity
             android:name=".MainActivity"
@@ -393,7 +392,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // === Lifecycle ===
+    // === Lifecycle (prevent crash/exit) ===
     @Override
     protected void onResume() {
         super.onResume();
@@ -412,15 +411,34 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        // Don't pause WebViews — keeps Firebase connection alive, prevents crash on resume
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // Reduce memory when app is in background
         mainWebView.onPause();
         youtubeWebView.onPause();
     }
 
     @Override
     protected void onDestroy() {
+        mainWebView.stopLoading();
+        youtubeWebView.stopLoading();
         mainWebView.destroy();
         youtubeWebView.destroy();
         super.onDestroy();
+    }
+
+    // Prevent app from being killed easily
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= TRIM_MEMORY_MODERATE) {
+            // Clear YouTube WebView cache to free memory
+            youtubeWebView.clearCache(false);
+        }
     }
 }
 ```
@@ -432,13 +450,7 @@ public class MainActivity extends Activity {
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowFullscreen">false</item>
-        <item name="android:statusBarColor">#F4F7FB</item>
-        <item name="android:navigationBarColor">#F4F7FB</item>
-        <item name="android:windowLightStatusBar">true</item>
+    <style name="AppTheme" parent="android:Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@android:color/white</item>
     </style>
 </resources>
@@ -465,13 +477,12 @@ plugins {
 }
 
 android {
-    namespace 'com.erfan.calendar'
     compileSdk 34
 
     defaultConfig {
         applicationId "com.erfan.calendar"
         minSdk 24
-        targetSdk 34
+        targetSdk 33
         versionCode 1
         versionName "1.0"
     }
