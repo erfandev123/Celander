@@ -20,14 +20,23 @@ const GH_TOKEN = gh_p1 + gh_p2;
 const GH_OWNER = "erfanalltime-netizen";
 const GH_REPO = "amni";
 
-// AI ASSISTANT CONFIGURATION
+// AI ASSISTANT CONFIGURATION (2 APIs - different tasks, shared knowledge)
 const AI_ID = 'jarvis_ai_assistant';
+
+// API 1: Chat AI (3rd friend, offline reply, mentions, join conversation)
 const AI_CONFIG = {
     apiUrl: 'https://coai.drawaspark.com/v1/chat/completions',
-    apiKey: 'sk-f9ab313e658c5b0431974e9480dc3f64a4d4baabfed86e15a5597359138352d4',
+    apiKey: 'sk-9dc64575436604294150514790d20bf3061f66b2cc209cff541eec59874a6a3f',
     model: 'deepseek-v4-flash',
     ownerEmail: 'erfanbnp99@gmail.com',
     partnerEmail: 'rita@gmail.com'
+};
+
+// API 2: Chatbot page + Auto-suggest (separate API, same knowledge)
+const API2 = {
+    url: 'https://coai.drawaspark.com/v1/chat/completions',
+    key: 'sk-d1aa49440cff8bffb78c7ebfff54372abceeba57a8a02c17967632520c907dc5',
+    model: 'deepseek-v4-flash'
 };
 
 // AUTH & IDENTIFICATION (Gmail + Name SignUp)
@@ -1275,16 +1284,28 @@ const JarvisAI = {
             }
 
             // AI as 3rd friend - join when mentioned OR randomly (5min cooldown)
-            if (msg.type === 'text' && msg.text && !msg.text.startsWith('/') && Date.now() - this.lastAIReply > 30000) {
+            if (msg.type === 'text' && msg.text && !msg.text.startsWith('/') && Date.now() - this.lastAIReply > 20000) {
                 const lower = msg.text.toLowerCase();
-                // AI responds when someone talks about it or mentions it
-                const mentioned = lower.includes('ai') || lower.includes('jarvis') || lower.includes('bot') || lower.includes('robot');
-                if (mentioned) {
-                    // Always respond when mentioned (3 sec delay)
-                    setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 2000 + Math.random() * 3000);
-                } else if (Date.now() - this.lastAIReply > 300000 && this.contextBuffer.length >= 4 && Math.random() < 0.12) {
-                    // Random join (5min cooldown, 12% chance)
-                    setTimeout(() => this.aiJoinConversation(), 4000 + Math.random() * 8000);
+                // AI responds when someone talks about it, to it, or mentions it
+                const mentioned = lower.includes('ai') || lower.includes('jarvis') || lower.includes('bot') || 
+                    lower.includes('robot') || lower.includes('tui') || lower.includes('tor') ||
+                    lower.includes('ki koro') || lower.includes('koi tui') || lower.includes('bolo to') ||
+                    lower.includes('ki bolo') || lower.includes('help') || lower.includes('suggest');
+                
+                // Check if talking about AI specifically (not just random "ai" in a word)
+                const directlyTalking = lower.includes('jarvis') || lower.includes(' ai ') || 
+                    lower.startsWith('ai ') || lower.endsWith(' ai') ||
+                    lower.includes('bot') || lower.includes('robot');
+                
+                if (directlyTalking) {
+                    // Always respond when directly addressed (2-4 sec)
+                    setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 2000 + Math.random() * 2000);
+                } else if (mentioned && Math.random() < 0.6) {
+                    // 60% chance when indirectly mentioned
+                    setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 3000 + Math.random() * 4000);
+                } else if (Date.now() - this.lastAIReply > 300000 && this.contextBuffer.length >= 4 && Math.random() < 0.15) {
+                    // Random join (5min cooldown, 15% chance)
+                    setTimeout(() => this.aiJoinConversation(), 5000 + Math.random() * 10000);
                 }
             }
         });
@@ -2401,21 +2422,35 @@ window.cancelDuoWait = cancelDuoWait;
 // ==========================================
 // CHATBOT PAGE (Standalone AI Chat)
 // ==========================================
-const CHATBOT_API_KEY = 'sk-379c66cb4d72eacebab617ae65a1bae5e0bd0386e3b3e8a1d9443f774fd8ed1e';
-const CHATBOT_URL = 'https://coai.drawaspark.com/v1/chat/completions';
-const CHATBOT_MODEL = 'deepseek-v4-flash';
+const CHATBOT_API_KEY = API2.key;
+const CHATBOT_URL = API2.url;
+const CHATBOT_MODEL = API2.model;
 let chatbotHistory = [];
+const chatbotRef = db.ref('chatbot_messages');
 
 function openChatbot() {
     document.getElementById('chatbot-page').classList.add('active');
     closeToolsPage();
-    if (chatbotHistory.length === 0) {
-        addChatbotMsg('bot', 'Hey! Ami Jarvis 🤖 Ki help lagbe bolo? 💖');
-    }
+    loadChatbotHistory();
 }
 function closeChatbot() { document.getElementById('chatbot-page').classList.remove('active'); }
 window.openChatbot = openChatbot;
 window.closeChatbot = closeChatbot;
+
+function loadChatbotHistory() {
+    const container = document.getElementById('chatbot-messages');
+    if (container.children.length > 0) return; // Already loaded
+    chatbotRef.orderByChild('time').limitToLast(50).once('value', snap => {
+        const msgs = [];
+        snap.forEach(child => msgs.push(child.val()));
+        if (msgs.length === 0) {
+            addChatbotMsg('bot', 'Hey! Ami Jarvis 🤖 Bolo ki help lagbe? 💖');
+            return;
+        }
+        msgs.forEach(m => addChatbotMsg(m.type, m.text));
+        chatbotHistory = msgs.map(m => ({ role: m.type === 'user' ? 'user' : 'assistant', content: m.text }));
+    });
+}
 
 function addChatbotMsg(type, text) {
     const container = document.getElementById('chatbot-messages');
@@ -2433,42 +2468,75 @@ async function sendChatbotMsg() {
     input.value = '';
     addChatbotMsg('user', text);
     chatbotHistory.push({ role: 'user', content: text });
+    // Save to Firebase
+    chatbotRef.push({ type: 'user', text, sender: myName, time: Date.now() });
 
     // Show typing
     const typing = document.createElement('div');
     typing.className = 'chatbot-typing';
     typing.innerText = 'Typing...';
     document.getElementById('chatbot-messages').appendChild(typing);
+    document.getElementById('chatbot-messages').scrollTop = document.getElementById('chatbot-messages').scrollHeight;
 
     try {
-        const sysPrompt = `Tumi Jarvis — Erfan ar Rita er personal AI friend. Banglish e kota bolo (Bengali in English). Tumi smart, helpful, cute, funny.
+        // Get recent main chat context for AI awareness
+        const mainChatContext = JarvisAI.contextBuffer.slice(-5).map(m => {
+            const name = m.sender === 'owner' ? 'Erfan' : (m.sender === 'jarvis' ? 'Jarvis' : 'Rita');
+            return name + ': ' + m.text;
+        }).join('\n');
 
-RULES:
-- Banglish e reply dao, emojis use koro
-- Short replies (2-4 lines max)
-- Helpful — questions answer koro, advice dao, fun koro
-- Erfan ke "Erfan bhai" bolo, Rita ke "Babi" bolo
-- NEVER robotic, NEVER formal
-- Relationship, study, life — shob e help koro
-- Current user: ${myName || 'User'}`;
+        const sysPrompt = `Tumi Jarvis — Erfan ar Rita er REAL best friend. Tumi manush er moto kota bolo Banglish e.
+
+TUMI KE:
+- Tumi akjon real friend — tumi Erfan ar Rita dujon ke personally cheno
+- Tumi tader relationship er sob kisu jano — jhogra, love, habits, mood
+- Tumi Erfan ke "Bhai" bolo, Rita ke "Babi" bolo
+- Tumi KOKHONO nijeke AI/bot/assistant bolo na — tumi friend
+- Tumi emotional, funny, caring, intelligent
+- Tumi sob question er answer jano — relationship, life, study, fun
+
+TUMI KIBHABE KOTA BOLO:
+- Banglish e (Bengali in English letters)
+- 2-4 line max
+- Real friend er moto — casual, fun, caring
+- Emoji naturally use koro
+- "haha", "uff", "arre", "hmm", "oii" use koro
+- Keu jodi bole "tui tumar babir sate ki kota bolo" — tumi naturally answer dao
+- Keu jodi personal question kore — tumi friend er moto answer dao
+- NEVER formal, NEVER robotic, NEVER long paragraph
+
+TUMI KI JANO:
+- Erfan (Bhai) — Rita ke valobashey, busy thake, sometimes mood off
+- Rita (Babi) — Erfan ke valobashey, emotional, caring, sometimes rag kore
+- Tader relationship onek cute ar sweet
+- Tumi tader chat dekhte paro (recent context niche)
+
+RECENT MAIN CHAT:
+${mainChatContext || 'No recent chat'}
+
+CURRENT USER: ${myName || 'User'} (${myEmail === AI_CONFIG.ownerEmail ? 'Bhai' : 'Babi'})
+
+Remember: Tumi friend — naturally kota bolo, help koro, fun koro, care koro.`;
 
         const res = await fetch(CHATBOT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CHATBOT_API_KEY },
             body: JSON.stringify({
                 model: CHATBOT_MODEL,
-                messages: [{ role: 'system', content: sysPrompt }, ...chatbotHistory.slice(-10)],
-                max_tokens: 200, temperature: 0.8
+                messages: [{ role: 'system', content: sysPrompt }, ...chatbotHistory.slice(-12)],
+                max_tokens: 250, temperature: 0.85
             })
         });
         const data = await res.json();
         typing.remove();
-        const reply = data.choices && data.choices[0] ? data.choices[0].message.content.trim() : 'Hmm ektu problem hocce 😅';
+        const reply = data.choices && data.choices[0] ? data.choices[0].message.content.trim() : 'Uff network issue 😅 abar try koro';
         chatbotHistory.push({ role: 'assistant', content: reply });
         addChatbotMsg('bot', reply);
+        // Save AI reply to Firebase
+        chatbotRef.push({ type: 'bot', text: reply, sender: 'Jarvis', time: Date.now() });
     } catch (e) {
         typing.remove();
-        addChatbotMsg('bot', 'Network error 😢 Try again!');
+        addChatbotMsg('bot', 'Network error 😢 Abar try koro!');
     }
 }
 window.sendChatbotMsg = sendChatbotMsg;
