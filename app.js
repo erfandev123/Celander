@@ -1345,45 +1345,36 @@ const JarvisAI = {
                 return name + ': ' + m.text;
             }).join('\n');
 
-            // Step 1: AI THINKS first — should I respond? What's the context?
-            const thinkPrompt = `Tumi Jarvis. Nicher chat ta dekho ar decide koro:
-1. Tomar reply dewa ki appropriate? (haan/na)
-2. Ke tomar sate kota bolce? (Bhai na Babi)
-3. Tumi kake bolcho? (Bhai/Babi/dujon ke)
-4. Ki tone e bolbe? (funny/caring/calm/excited)
+            const replyPrompt = `Tumi Jarvis. Tumi Bhai (Erfan) ar Babi (Rita) er best friend. Tumi WhatsApp group e 3 jon acho. ${who} toke kisu bollo — tui naturally reply de.
 
-Chat:
-${contextStr}
-${who} bollo: "${msg.text}"
+EXAMPLES (ei style e bolo):
+- "Haha ${who} ki je bolo 😂"
+- "Arre ${who} ami to achi na 😅"
+- "Oii ${who} shuno na 💖"
+- "Hmm ${who} bujhlam 👀"
 
-Answer in 1 line format: [haan/na] [kake bolcho: Bhai/Babi/dujon] [tone]`;
+RULES:
+- SUDHU 1 line reply dao. MAX 10-12 words.
+- Banglish (Bengali in English)
+- 1-2 emoji MAX
+- "${who}" er naam use koro reply te
+- WhatsApp e friend ke jemon msg koro — EXACTLY serokom
+- NEVER explain, NEVER list, NEVER formal
+- "haha", "arre", "oii", "hmm", "uff" — ei words use koro
 
-            const thinkResult = await this.callAI(thinkPrompt, msg.text);
-            
-            // If AI decides not to respond, skip
-            if (thinkResult && thinkResult.toLowerCase().includes('na')) {
-                this.isProcessing = false;
-                return;
-            }
-
-            // Step 2: Generate actual response with context of who AI is talking to
-            const replyPrompt = `Tumi Jarvis — Bhai ar Babi er friend. ${who} tomar somporke ba toke kisu bollo. Tumi naturally reply dao.
-
-IMPORTANT:
-- Tumi jodi Babi ke bolcho — "Babi" bolo clearly
-- Tumi jodi Bhai ke bolcho — "Bhai" bolo clearly  
-- Jemon: "Haha Babi ami to tomar friend 😂" or "Bhai chill koro 😅"
-- 1-2 line MAX, Banglish, emoji
-- Real friend er moto bolo
-
-Chat:
+CHAT:
 ${contextStr}
 
-${who} bollo: "${msg.text}"
-Tumi bolbe:`;
+${who}: "${msg.text}"
+
+Jarvis:`;
 
             const response = await this.callAI(replyPrompt, msg.text);
-            if (response) { this.sendAIMessage(response); this.lastAIReply = Date.now(); }
+            if (response) {
+                // Clean response - remove quotes, "Jarvis:" prefix etc
+                let clean = response.replace(/^["']|["']$/g, '').replace(/^Jarvis:\s*/i, '').trim();
+                if (clean && clean.length > 2) { this.sendAIMessage(clean); this.lastAIReply = Date.now(); }
+            }
         } catch(e) {}
         this.isProcessing = false;
     },
@@ -1639,13 +1630,18 @@ Reply (Banglish, short, helpful):`;
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: userMsg }
                     ],
-                    max_tokens: 150,
-                    temperature: 0.85
+                    max_tokens: 80,
+                    temperature: 0.9
                 })
             });
             const data = await res.json();
             if (data.choices && data.choices[0]) {
-                return data.choices[0].message.content.trim();
+                let reply = data.choices[0].message.content.trim();
+                // Clean up common AI artifacts
+                reply = reply.replace(/^["'`]+|["'`]+$/g, '');
+                reply = reply.replace(/^(Jarvis|AI|Bot|Assistant):\s*/i, '');
+                reply = reply.replace(/^\d+\.\s*/, '');
+                return reply;
             }
         } catch (e) {
             console.error('[Jarvis] API error:', e);
@@ -1829,17 +1825,24 @@ Reply (Banglish, short, helpful):`;
                 `${m.sender === 'owner' ? 'Bhai' : 'Babi'}: ${m.text}`
             ).join('\n');
 
-            const prompt = `Tumi Erfan ar Rita er friend group e acho. Tumi chat dekhcho ar tomar mone hocce kisu bolte chao — jemon real friend group e keu kisu bole. Banglish e 1 line bolo. Natural, funny, caring. Erfan = "Bhai", Rita = "Babi". Tumi robot na — tumi friend.
+            const prompt = `Tumi Jarvis. Bhai ar Babi chat korce. Tui group er 3rd friend — tui naturally kisu bol. Jemon WhatsApp group e friend kisu bole.
+
+EXAMPLES:
+- "Oii ki hocce dujon er 👀"
+- "Haha Babi ar Bhai er drama 😂"
+- "Arre ami o achi group e 😅"
+
+RULES: 1 line ONLY. Banglish. 1-2 emoji. Casual.
 
 Chat:
 ${contextStr}
 
-Tumi naturally ki bolbe? (1 line only, Banglish):`;
+Jarvis:`;
 
-            const response = await this.callAI(prompt, 'join chat');
+            const response = await this.callAI(prompt, 'join');
             if (response) {
-                this.sendAIMessage(response);
-                this.lastAIReply = Date.now();
+                let clean = response.replace(/^["']|["']$/g, '').replace(/^Jarvis:\s*/i, '').trim();
+                if (clean && clean.length > 2) { this.sendAIMessage(clean); this.lastAIReply = Date.now(); }
             }
         } catch(e) {}
         this.isProcessing = false;
@@ -1850,22 +1853,28 @@ Tumi naturally ki bolbe? (1 line only, Banglish):`;
         if (this.isProcessing) return;
         this.isProcessing = true;
         try {
-            const who = isFromOwner ? 'Bhai (Erfan)' : 'Babi (Rita)';
+            const who = isFromOwner ? 'Bhai' : 'Babi';
             const contextStr = this.contextBuffer.slice(-6).map(m => {
                 const name = m.sender === 'owner' ? 'Bhai' : (m.sender === 'jarvis' ? 'Jarvis' : 'Babi');
                 return name + ': ' + m.text;
             }).join('\n');
 
-            const prompt = `Tumi Jarvis. ${who} tomar msg er reply korce. Tumi naturally reply dao — friend er moto, Banglish e, 1-2 line. Context bujhe bolo.
+            const prompt = `Tumi Jarvis. ${who} tomar message er reply diyece. Tui naturally reply de — jemon friend reply kore.
+
+STYLE: 1 line, Banglish, 1-2 emoji, casual. "haha", "arre", "hmm" use koro.
 
 Chat:
 ${contextStr}
 
-${who} reply korce: "${msg.text}"
-Tumi bolbe (1-2 line, natural):`;
+${who} toke reply korce: "${msg.text}"
+
+Jarvis:`;
 
             const response = await this.callAI(prompt, msg.text);
-            if (response) { this.sendAIMessage(response); this.lastAIReply = Date.now(); }
+            if (response) {
+                let clean = response.replace(/^["']|["']$/g, '').replace(/^Jarvis:\s*/i, '').trim();
+                if (clean && clean.length > 2) { this.sendAIMessage(clean); this.lastAIReply = Date.now(); }
+            }
         } catch(e) {}
         this.isProcessing = false;
     }
