@@ -26,17 +26,17 @@ const AI_ID = 'jarvis_ai_assistant';
 // API 1: Chat AI (3rd friend, offline reply, mentions, join conversation)
 const AI_CONFIG = {
     apiUrl: 'https://coai.drawaspark.com/v1/chat/completions',
-    apiKey: 'sk-9dc64575436604294150514790d20bf3061f66b2cc209cff541eec59874a6a3f',
-    model: 'deepseek-v4-flash',
+    apiKey: 'sk-233b0903d158fd6c5a2bf2804ddd847b40677b3eb442649b4a8307e62676125a',
+    model: 'gpt-5-nano',
     ownerEmail: 'erfanbnp99@gmail.com',
     partnerEmail: 'rita@gmail.com'
 };
 
-// API 2: Chatbot page + Auto-suggest (separate API, same knowledge)
+// API 2: Chatbot page + Auto-suggest
 const API2 = {
     url: 'https://coai.drawaspark.com/v1/chat/completions',
-    key: 'sk-d1aa49440cff8bffb78c7ebfff54372abceeba57a8a02c17967632520c907dc5',
-    model: 'deepseek-v4-flash'
+    key: 'sk-254a3eb593bd1b83f57ca03d7869aaff625f657e7be5e8a3657aff2c11e5a851',
+    model: 'gpt-5-nano'
 };
 
 // AUTH & IDENTIFICATION (Gmail + Name SignUp)
@@ -1606,54 +1606,49 @@ Reply (Banglish, short, helpful):`;
 
     // Call AI API
     async callAI(systemPrompt, userMsg) {
-        try {
-            const res = await fetch(AI_CONFIG.apiUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${AI_CONFIG.apiKey}`
-                },
-                body: JSON.stringify({
-                    model: AI_CONFIG.model,
-                    messages: [
-                        { role: 'system', content: systemPrompt },
-                        { role: 'user', content: userMsg }
-                    ],
-                    max_tokens: 100,
-                    temperature: 0.9
-                })
-            });
-            if (!res.ok) {
-                // API error — notify owner
-                this.notifyAPIError('API ' + res.status + ': ' + res.statusText);
-                return null;
-            }
-            const data = await res.json();
-            if (data.error) {
-                this.notifyAPIError(data.error.message || 'Unknown API error');
-                return null;
-            }
-            if (data.choices && data.choices[0]) {
-                let reply = data.choices[0].message.content.trim();
-                reply = reply.replace(/^["'`]+|["'`]+$/g, '');
-                reply = reply.replace(/^(Jarvis|AI|Bot|Assistant|জার্ভিস):\s*/i, '');
-                reply = reply.replace(/^\d+\.\s*/, '');
-                reply = reply.replace(/^[-–]\s*/, '');
-                if (reply.length < 2) return null;
-                return reply;
-            }
-        } catch (e) {
-            this.notifyAPIError(e.message || 'Network error');
+        // Primary + multiple backup APIs
+        const apis = [
+            { url: 'https://coai.drawaspark.com/v1/chat/completions', key: 'sk-233b0903d158fd6c5a2bf2804ddd847b40677b3eb442649b4a8307e62676125a', model: 'gpt-5-nano' },
+            { url: 'https://api.chatanywhere.tech/v1/chat/completions', key: 'sk-8BjkBkiMha9hOrMddv3X6Fd4OsyZexO7CTaMgt8F7Y7Cn33G', model: 'gpt-4o-mini' },
+            { url: 'https://api.chatanywhere.tech/v1/chat/completions', key: 'sk-y5qoc2c6pREhb8kWhCRYB2rqd0MnxIwIhqa671L4PtjpGepd', model: 'gpt-4o-mini' },
+            { url: 'https://api.chatanywhere.tech/v1/chat/completions', key: 'sk-msUYNSt02SD8dERk5tWxZcnwZOXmayviGqyxADJtOXPIgiHo', model: 'gpt-4o-mini' }
+        ];
+        
+        for (let i = 0; i < apis.length; i++) {
+            try {
+                const api = apis[i];
+                const res = await fetch(api.url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.key}` },
+                    body: JSON.stringify({
+                        model: api.model,
+                        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMsg }],
+                        max_tokens: 100, temperature: 0.9
+                    })
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                if (data.error) continue;
+                if (data.choices && data.choices[0]) {
+                    let reply = data.choices[0].message.content.trim();
+                    reply = reply.replace(/^["'`]+|["'`]+$/g, '');
+                    reply = reply.replace(/^(Jarvis|AI|Bot|Assistant|জার্ভিস):\s*/i, '');
+                    reply = reply.replace(/^\d+\.\s*/, '');
+                    reply = reply.replace(/^[-–]\s*/, '');
+                    if (reply.length < 2) continue;
+                    return reply;
+                }
+            } catch (e) { continue; }
         }
+        this.notifyAPIError('সব API fail করেছে');
         return null;
     },
 
-    // Notify owner about API errors (only erfanbnp99@gmail.com sees this)
+    // Notify owner about API errors
     notifyAPIError(errorMsg) {
         if (myEmail.toLowerCase() !== AI_CONFIG.ownerEmail) return;
-        // Show small toast notification
         const toast = document.createElement('div');
-        toast.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;z-index:9999;opacity:0.9;';
+        toast.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;z-index:9999;opacity:0.9;max-width:90%;text-align:center;';
         toast.innerText = '⚠️ AI Error: ' + errorMsg;
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 5000);
