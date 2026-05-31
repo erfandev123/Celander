@@ -778,8 +778,7 @@ function attachInteractions(element) {
         bubbleEl.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             selectedMsgElement = element;
-            if (isOut) { document.getElementById('btn-delete').style.display = 'flex'; }
-            else { document.getElementById('btn-delete').style.display = 'none'; }
+            document.getElementById('btn-delete').style.display = 'flex';
             document.getElementById('overlay').classList.add('active');
             document.getElementById('context-menu').classList.add('active');
         });
