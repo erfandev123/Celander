@@ -1313,29 +1313,29 @@ const JarvisAI = {
                 }
             }
 
-            // AI as 3rd friend - join when mentioned OR randomly (5min cooldown)
-            if (msg.type === 'text' && msg.text && !msg.text.startsWith('/') && Date.now() - this.lastAIReply > 20000) {
+            // AI as 3rd friend - ALWAYS respond when mentioned, no cooldown for direct mention
+            if (msg.type === 'text' && msg.text && !msg.text.startsWith('/')) {
                 const lower = msg.text.toLowerCase();
-                // AI responds when someone talks about it, to it, or mentions it
-                const mentioned = lower.includes('ai') || lower.includes('jarvis') || lower.includes('bot') || 
-                    lower.includes('robot') || lower.includes('tui') || lower.includes('tor') ||
-                    lower.includes('ki koro') || lower.includes('koi tui') || lower.includes('bolo to') ||
-                    lower.includes('ki bolo') || lower.includes('help') || lower.includes('suggest');
+                const bangla = msg.text; // Keep original for Bangla detection
                 
-                // Check if talking about AI specifically (not just random "ai" in a word)
-                const directlyTalking = lower.includes('jarvis') || lower.includes(' ai ') || 
-                    lower.startsWith('ai ') || lower.endsWith(' ai') ||
-                    lower.includes('bot') || lower.includes('robot');
+                // Direct mention - ALWAYS respond (no cooldown)
+                const directMention = lower.includes('jarvis') || lower.includes('জার্ভিস') ||
+                    bangla.includes('জার্ভিস') || lower.includes('jarbi') || lower.includes('jarvis') ||
+                    lower.includes('jarbis') || lower.includes('jarbes');
                 
-                if (directlyTalking) {
-                    // Always respond when directly addressed (2-4 sec)
-                    setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 2000 + Math.random() * 2000);
-                } else if (mentioned && Math.random() < 0.6) {
-                    // 60% chance when indirectly mentioned
-                    setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 3000 + Math.random() * 4000);
-                } else if (Date.now() - this.lastAIReply > 300000 && this.contextBuffer.length >= 4 && Math.random() < 0.15) {
-                    // Random join (5min cooldown, 15% chance)
-                    setTimeout(() => this.aiJoinConversation(), 5000 + Math.random() * 10000);
+                if (directMention) {
+                    setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 1500 + Math.random() * 2000);
+                } else if (Date.now() - this.lastAIReply > 20000) {
+                    // Other mentions need 20sec cooldown
+                    const mentioned = lower.includes(' ai ') || lower.startsWith('ai ') || 
+                        lower.includes('bot') || lower.includes('robot') ||
+                        bangla.includes('এআই') || bangla.includes('বট');
+                    
+                    if (mentioned) {
+                        setTimeout(() => this.aiRespondToMention(msg, isFromOwner), 2000 + Math.random() * 3000);
+                    } else if (Date.now() - this.lastAIReply > 300000 && this.contextBuffer.length >= 4 && Math.random() < 0.15) {
+                        setTimeout(() => this.aiJoinConversation(), 5000 + Math.random() * 10000);
+                    }
                 }
             }
         });
@@ -1619,23 +1619,44 @@ Reply (Banglish, short, helpful):`;
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: userMsg }
                     ],
-                    max_tokens: 80,
+                    max_tokens: 100,
                     temperature: 0.9
                 })
             });
+            if (!res.ok) {
+                // API error — notify owner
+                this.notifyAPIError('API ' + res.status + ': ' + res.statusText);
+                return null;
+            }
             const data = await res.json();
+            if (data.error) {
+                this.notifyAPIError(data.error.message || 'Unknown API error');
+                return null;
+            }
             if (data.choices && data.choices[0]) {
                 let reply = data.choices[0].message.content.trim();
-                // Clean up common AI artifacts
                 reply = reply.replace(/^["'`]+|["'`]+$/g, '');
-                reply = reply.replace(/^(Jarvis|AI|Bot|Assistant):\s*/i, '');
+                reply = reply.replace(/^(Jarvis|AI|Bot|Assistant|জার্ভিস):\s*/i, '');
                 reply = reply.replace(/^\d+\.\s*/, '');
+                reply = reply.replace(/^[-–]\s*/, '');
+                if (reply.length < 2) return null;
                 return reply;
             }
         } catch (e) {
-            console.error('[Jarvis] API error:', e);
+            this.notifyAPIError(e.message || 'Network error');
         }
         return null;
+    },
+
+    // Notify owner about API errors (only erfanbnp99@gmail.com sees this)
+    notifyAPIError(errorMsg) {
+        if (myEmail.toLowerCase() !== AI_CONFIG.ownerEmail) return;
+        // Show small toast notification
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#ff4444;color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;z-index:9999;opacity:0.9;';
+        toast.innerText = '⚠️ AI Error: ' + errorMsg;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
     },
 
     // Send AI message to chat
