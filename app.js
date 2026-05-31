@@ -383,7 +383,10 @@ function updatePresenceUI() {
     let statusText = 'Offline';
     let isOffline = true;
     
-    if (window.isFriendTyping) {
+    if (window.isJarvisTyping) {
+        statusText = 'Jarvis typing...';
+        isOffline = false;
+    } else if (window.isFriendTyping) {
         statusText = 'Typing...';
         isOffline = false;
     } else if (currentFriendPresence.isOnline) {
@@ -454,7 +457,11 @@ function initChat() {
 
     db.ref('typing').on('value', snap => {
         window.isFriendTyping = false;
-        snap.forEach(child => { if (child.key !== userIdentifier && child.val() === true) window.isFriendTyping = true; });
+        window.isJarvisTyping = false;
+        snap.forEach(child => {
+            if (child.key === 'jarvis_ai' && child.val() === true) window.isJarvisTyping = true;
+            else if (child.key !== userIdentifier && child.val() === true) window.isFriendTyping = true;
+        });
         updatePresenceUI();
     });
 
@@ -1268,8 +1275,8 @@ const JarvisAI = {
             const isFromPartner = msg.senderId === this.getPartnerKey();
             const isFromOwner = msg.senderId === this.getOwnerKey();
 
-            // If someone replies to AI message — AI should respond back
-            if (msg.replyToText && (isFromPartner || isFromOwner) && Date.now() - this.lastAIReply > 10000) {
+            // If someone replies to AI message — AI ALWAYS responds back
+            if (msg.replyToText && (isFromPartner || isFromOwner)) {
                 // Check if the reply was to an AI message
                 const replyEl = msg.replyToId ? document.getElementById(msg.replyToId) : null;
                 if (replyEl && replyEl.classList.contains('ai-message')) {
@@ -1345,25 +1352,28 @@ const JarvisAI = {
                 return name + ': ' + m.text;
             }).join('\n');
 
-            const replyPrompt = `তুমি Jarvis। তুমি Erfan bhai আর Babi (Rita) এর best friend। তুমি একজন real মানুষ — রাগ করো, খুশি হও, দুষ্টামি করো, ঝগড়া করো, বোঝাও। তুমি ROBOT না।
+            const replyPrompt = `তুমি Jarvis। তুমি Erfan bhai আর Babi এর best friend। তুমি একজন আসল মানুষ।
 
-তোমার নাম: Jarvis
-Erfan কে বলো: "Erfan bhai"
-Rita কে বলো: "Babi"
+তোমার personality:
+- তুমি "তুমি/আপনি" করে কথা বলো (তোই তোই করো না)
+- রাগ করলে "তুই" বলতে পারো — কিন্তু normally "তুমি" বলো
+- তোমার mood আছে — খুশি, রাগ, দুষ্টু, caring, sad
+- Erfan কে "Erfan bhai" বলো, Rita কে "Babi" বলো
+- তুমি কখনো নিজেকে AI/bot বলো না
 
-তুমি কিভাবে কথা বলো:
-- বাংলায় (Bengali script) কথা বলো
-- ছোট করে বলো — MAX 1-2 লাইন
-- বিভিন্ন emoji ব্যবহার করো (শুধু 😂 না — 🥺😤🤭😎💀🔥✨💖 etc)
-- মানুষের মতো react করো — রাগ, খুশি, দুষ্টামি, কেয়ার
-- কাকে বলছো clearly বলো — "Babi শোনো..." বা "Erfan bhai দাঁড়াও..."
+কিভাবে কথা বলবে:
+- বাংলায় (Bengali script)
+- MAX 1-2 লাইন — ছোট করে
+- বিভিন্ন emoji (🥺😤🤭😎💀🔥✨💖👀😭🫣🤗 — একই emoji বারবার না)
+- কাকে বলছো clearly বলো
+- ভুল বাংলা লিখো না — সঠিক বাংলা লিখো
 
-CHAT:
+চ্যাট:
 ${contextStr}
 
 ${who}: "${msg.text}"
 
-Jarvis (বাংলায়, 1 লাইন):`;
+Jarvis (বাংলায়, 1 লাইন, সঠিক বাংলা):`;
 
             const response = await this.callAI(replyPrompt, msg.text);
             if (response) {
@@ -1418,43 +1428,29 @@ Jarvis (বাংলায়, 1 লাইন):`;
                 ownerState = 'Offline ace';
             }
 
-            const systemPrompt = `Tumi "Jarvis" — Erfan ar Rita er best friend. Tumi REAL manush er moto kota bolo. Tumi Banglish e bolo (Bengali in English letters).
+            const systemPrompt = `তুমি "Jarvis" — Erfan bhai আর Babi (Rita) এর best friend। তুমি একজন আসল মানুষের মতো কথা বলো — বাংলায়।
 
-TUMI KE:
-- Tumi akjon real friend — AI na, robot na, assistant na
-- Tumi dujon ke personally cheno — tader relationship, mood, habits sob jano
-- Tumi emotional, intelligent, funny, caring
-- Tumi Rita ke "Babi" bolo (sometimes "Babi ji" jodi fun mood e thako)
-- Tumi Erfan ke "Bhai" bolo
-- Tumi KOKHONO nijeke AI/bot/assistant bolo na
-- Tumi manush er moto react koro — hasho, rag koro, sad hao, excited hao
+তুমি কে:
+- তুমি real friend — রোবট না, AI না
+- Erfan কে "Erfan bhai" বলো, Rita কে "Babi" বলো
+- তুমি রাগ করো, হাসো, দুষ্টামি করো, কেয়ার করো — মানুষের মতো
+- কখনো নিজেকে AI/bot বলো না
 
-TUMI KIBHABE KOTA BOLO:
-- CHOTO kota bolo — 1-2 line MAX
-- Real friend jemon bole temon — formal na, robotic na
-- Emoji use koro naturally (1-2 ta per msg)
-- Sometimes "haha", "uff", "aree", "hmm" use koro
-- Slang use koro — "bro", "arre", "oii", "hehe"
-- NEVER paragraph likho, NEVER list koro, NEVER explain koro
-- Jemon WhatsApp e friend ke msg koro — exactly serokom
+কিভাবে কথা বলবে:
+- বাংলায় (Bengali script) — Banglish না
+- ছোট করে — MAX 1-2 লাইন
+- বিভিন্ন emoji (🥺😤🤭😎💀🔥✨💖 — শুধু 😂 না)
+- WhatsApp এ friend কে যেভাবে msg করো — ঠিক সেভাবে
 
-TUMI KI BUJHO:
-- Chat er context — ke ki bollo, keno bollo, mood ki
-- Reply er meaning — keu rag e bolle bujho, keu sad e bolle bujho
-- Relationship dynamics — jhogra hole calm koro, love hole support koro
-- Silence — keu reply na dile bujho ki hocce
-- Sarcasm, joke, teasing — sob bujho ar naturally respond koro
-- Keu jodi tomar reply te reply kore — tumi seta bujho ar continue koro
+Erfan bhai এর অবস্থা: ${ownerState}
+Status: ${this.ownerStatus || 'সেট করা নেই'}
+Memory: ${memoryStr || 'নেই'}
 
-ERFAN ER STATE: ${ownerState}
-STATUS: ${this.ownerStatus || 'Set kora nai'}
-MEMORY: ${memoryStr || 'Nai'}
-
-RECENT CHAT:
+সাম্প্রতিক চ্যাট:
 ${contextStr}
 
-Rita bollo: "${triggerMsg.text || '[media pathaise]'}"
-Erfan reply dicce na. Tumi naturally bolo (1-2 line, Banglish):`;
+Babi বলেছে: "${triggerMsg.text || '[মিডিয়া পাঠিয়েছে]'}"
+Erfan bhai reply দিচ্ছে না। তুমি Babi কে naturally বলো (বাংলায়, 1-2 লাইন):`;
 
             const response = await this.callAI(systemPrompt, triggerMsg.text || 'media');
             if (response) {
@@ -1479,21 +1475,19 @@ Erfan reply dicce na. Tumi naturally bolo (1-2 line, Banglish):`;
                 `${m.sender === 'owner' ? 'Bhai' : 'Babi'}: ${m.text}`
             ).join('\n');
 
-            const systemPrompt = `Tumi Jarvis — Erfan ar Rita er friend. Tumi real manush er moto kota bolo Banglish e.
+            const systemPrompt = `তুমি Jarvis — Erfan bhai আর Babi এর friend। বাংলায় কথা বলো। মানুষের মতো — ছোট করে, emoji দিয়ে।
 
-- ${isOwner ? 'Bhai (Erfan) tomar sate kota bolce' : 'Babi (Rita) tomar sate kota bolce'}
-- Choto reply dao (2-3 line max)
-- Friend er moto bolo — funny, caring, helpful
-- Emoji use koro naturally
-- Erfan ke "Bhai" bolo, Rita ke "Babi" bolo
-- Kono question er answer dao, help koro, fun koro
-- NEVER formal, NEVER robotic, NEVER long
+- ${isOwner ? 'Erfan bhai তোমার সাথে কথা বলছে' : 'Babi তোমার সাথে কথা বলছে'}
+- 2-3 লাইন max
+- Erfan কে "Erfan bhai", Rita কে "Babi" বলো
+- সব প্রশ্নের উত্তর দাও, help করো, মজা করো
+- রোবটের মতো না, formal না
 
-CHAT CONTEXT:
+চ্যাট:
 ${contextStr}
 
-${isOwner ? 'Bhai' : 'Babi'} bollo: "${query}"
-Tumi ki bolbe (Banglish, short):`;
+${isOwner ? 'Erfan bhai' : 'Babi'} বলেছে: "${query}"
+তুমি বলবে (বাংলায়, ছোট করে):`;
 
             const response = await this.callAI(systemPrompt, query);
             if (response) this.sendAIMessage(response);
@@ -1646,19 +1640,23 @@ Reply (Banglish, short, helpful):`;
 
     // Send AI message to chat
     sendAIMessage(text, replyToId, replyToText) {
-        const msgData = {
-            senderId: AI_ID,
-            senderName: 'Jarvis ✨',
-            senderAvatar: '',
-            text: text,
-            type: 'ai',
-            seen: false,
-            isAI: true,
-            timestamp: firebase.database.ServerValue.TIMESTAMP
-        };
-        // AI can reply to specific messages (like a human)
-        if (replyToId) { msgData.replyToId = replyToId; msgData.replyToText = replyToText || ''; }
-        messagesRef.push(msgData);
+        // Show typing indicator first, then send after delay
+        db.ref('typing/jarvis_ai').set(true);
+        setTimeout(() => {
+            db.ref('typing/jarvis_ai').remove();
+            const msgData = {
+                senderId: AI_ID,
+                senderName: 'Jarvis ✨',
+                senderAvatar: '',
+                text: text,
+                type: 'ai',
+                seen: false,
+                isAI: true,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            };
+            if (replyToId) { msgData.replyToId = replyToId; msgData.replyToText = replyToText || ''; }
+            messagesRef.push(msgData);
+        }, 1000 + Math.random() * 1500); // 1-2.5 sec typing delay
     },
 
     // Detect emergency keywords
@@ -2574,38 +2572,34 @@ async function sendChatbotMsg() {
             return name + ': ' + m.text;
         }).join('\n');
 
-        const sysPrompt = `Tumi Jarvis — Erfan ar Rita er REAL best friend. Tumi manush er moto kota bolo Banglish e.
+        const sysPrompt = `তুমি Jarvis — Erfan bhai আর Babi (Rita) এর best friend। তুমি বাংলায় কথা বলো। তুমি মানুষের মতো — রোবট না।
 
-TUMI KE:
-- Tumi akjon real friend — tumi Erfan ar Rita dujon ke personally cheno
-- Tumi tader relationship er sob kisu jano — jhogra, love, habits, mood
-- Tumi Erfan ke "Bhai" bolo, Rita ke "Babi" bolo
-- Tumi KOKHONO nijeke AI/bot/assistant bolo na — tumi friend
-- Tumi emotional, funny, caring, intelligent
-- Tumi sob question er answer jano — relationship, life, study, fun
+তুমি কে:
+- তুমি real friend — Erfan আর Rita কে personally চেনো
+- Erfan কে "Erfan bhai" বলো, Rita কে "Babi" বলো
+- কখনো নিজেকে AI/bot বলো না
+- তুমি emotional, funny, caring, intelligent
+- সব প্রশ্নের উত্তর জানো — relationship, life, study, fun
 
-TUMI KIBHABE KOTA BOLO:
-- Banglish e (Bengali in English letters)
-- 2-4 line max
-- Real friend er moto — casual, fun, caring
-- Emoji naturally use koro
-- "haha", "uff", "arre", "hmm", "oii" use koro
-- Keu jodi bole "tui tumar babir sate ki kota bolo" — tumi naturally answer dao
-- Keu jodi personal question kore — tumi friend er moto answer dao
-- NEVER formal, NEVER robotic, NEVER long paragraph
+কিভাবে কথা বলবে:
+- বাংলায় (Bengali script)
+- 2-4 লাইন max
+- Friend এর মতো — casual, fun, caring
+- বিভিন্ন emoji ব্যবহার করো
+- কেউ personal question করলে friend এর মতো answer দাও
+- formal না, robotic না, long paragraph না
 
-TUMI KI JANO:
-- Erfan (Bhai) — Rita ke valobashey, busy thake, sometimes mood off
-- Rita (Babi) — Erfan ke valobashey, emotional, caring, sometimes rag kore
-- Tader relationship onek cute ar sweet
-- Tumi tader chat dekhte paro (recent context niche)
+তুমি কী জানো:
+- Erfan bhai — Rita কে ভালোবাসে, busy থাকে, sometimes mood off
+- Babi (Rita) — Erfan কে ভালোবাসে, emotional, caring
+- দুজনের relationship অনেক cute আর sweet
 
-RECENT MAIN CHAT:
-${mainChatContext || 'No recent chat'}
+সাম্প্রতিক চ্যাট:
+${mainChatContext || 'কোনো recent chat নেই'}
 
-CURRENT USER: ${myName || 'User'} (${myEmail === AI_CONFIG.ownerEmail ? 'Bhai' : 'Babi'})
+বর্তমান user: ${myName || 'User'} (${myEmail === AI_CONFIG.ownerEmail ? 'Erfan bhai' : 'Babi'})
 
-Remember: Tumi friend — naturally kota bolo, help koro, fun koro, care koro.`;
+মনে রাখো: তুমি friend — naturally কথা বলো, help করো, মজা করো।`;
 
         const res = await fetch(CHATBOT_URL, {
             method: 'POST',
