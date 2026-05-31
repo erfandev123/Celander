@@ -438,6 +438,14 @@
             <span id="game-arena-title">Game</span>
         </div>
         <div class="game-arena-body" id="game-arena-body"></div>
+        <!-- Mini Chat in Game -->
+        <div class="game-mini-chat" id="game-mini-chat">
+            <button class="mini-chat-toggle" id="mini-chat-toggle" onclick="toggleMiniChat()">💬</button>
+            <div class="mini-chat-box" id="mini-chat-box">
+                <div class="mini-chat-msgs" id="mini-chat-msgs"></div>
+                <div class="mini-chat-input"><input type="text" id="mini-chat-input" placeholder="Message..." autocomplete="off"><button onclick="sendMiniChat()">➤</button></div>
+            </div>
+        </div>
     </div>
 
     <!-- MEDIA GALLERY PAGE -->

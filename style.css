@@ -582,10 +582,12 @@ textarea#msg-input::-webkit-scrollbar { display: none; }
 .ai-header-btn svg { fill: var(--primary); }
 .ai-header-btn::after { content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background: #10B981; border-radius: 50%; border: 1.5px solid var(--surface); }
 
-/* AI Message Bubble */
-.msg-wrapper.ai-message { padding-left: 38px; margin-top: 14px; }
-.msg-wrapper.ai-message .ai-avatar { position: absolute; bottom: 0; left: 0; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; background: linear-gradient(135deg, rgba(93,95,239,0.12), rgba(162,155,254,0.1)); border: 1px solid rgba(93,95,239,0.1); }
-.msg-wrapper.ai-message .ai-bubble { background: var(--surface); color: var(--text-main); border: 1px solid rgba(93,95,239,0.1); border-bottom-left-radius: 4px; max-width: 78%; padding: 10px 14px; font-size: 14px; line-height: 1.5; border-radius: 18px; border-bottom-left-radius: 4px; position: relative; animation: popIn 0.3s ease-out; box-shadow: 0 1px 4px rgba(93,95,239,0.06); }
+/* AI Message Bubble - separate from normal messages */
+.msg-wrapper.ai-message { padding-left: 38px; margin-top: 16px; margin-bottom: 4px; }
+.msg-wrapper.ai-message + .msg-wrapper:not(.ai-message) { margin-top: 16px; }
+.msg-wrapper:not(.ai-message) + .msg-wrapper.ai-message { margin-top: 16px; }
+.msg-wrapper.ai-message .ai-avatar { position: absolute; bottom: 0; left: 0; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; background: linear-gradient(135deg, rgba(93,95,239,0.15), rgba(162,155,254,0.12)); border: 1px solid rgba(93,95,239,0.12); }
+.msg-wrapper.ai-message .ai-bubble { background: var(--surface); color: var(--text-main); border: 1px solid rgba(93,95,239,0.12); max-width: 78%; padding: 9px 13px; font-size: 14px; line-height: 1.5; border-radius: 16px; border-bottom-left-radius: 4px; position: relative; width: fit-content; }
 .ai-badge { display: inline-block; font-size: 8px; font-weight: 700; color: var(--primary); background: rgba(93,95,239,0.08); padding: 2px 5px; border-radius: 6px; margin-left: 6px; vertical-align: middle; letter-spacing: 0.5px; text-transform: uppercase; }
 
 /* AI Panel */
@@ -918,3 +920,16 @@ textarea#msg-input::-webkit-scrollbar { display: none; }
     #media-gallery { left: 320px; width: calc(100% - 320px); }
     .media-grid { grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px; }
 }
+
+/* Game Mini Chat */
+.game-mini-chat { position: absolute; bottom: 12px; right: 12px; z-index: 20; }
+.mini-chat-toggle { width: 40px; height: 40px; border-radius: 50%; background: var(--primary-gradient); border: none; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.15); }
+.mini-chat-box { display: none; position: absolute; bottom: 50px; right: 0; width: 260px; max-height: 280px; background: var(--surface); border-radius: 16px; border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 4px 20px rgba(0,0,0,0.12); flex-direction: column; overflow: hidden; }
+.mini-chat-box.active { display: flex; }
+.mini-chat-msgs { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 200px; font-size: 13px; }
+.mini-chat-msgs div { padding: 5px 10px; border-radius: 12px; max-width: 85%; width: fit-content; word-break: break-word; }
+.mini-chat-msgs .mc-out { align-self: flex-end; background: var(--primary-gradient); color: #fff; }
+.mini-chat-msgs .mc-in { align-self: flex-start; background: rgba(0,0,0,0.05); color: var(--text-main); }
+.mini-chat-input { display: flex; gap: 6px; padding: 8px; border-top: 1px solid rgba(0,0,0,0.05); }
+.mini-chat-input input { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid rgba(0,0,0,0.08); font-size: 13px; outline: none; background: var(--bg-app); }
+.mini-chat-input button { width: 32px; height: 32px; border-radius: 50%; background: var(--primary-gradient); border: none; color: #fff; font-size: 14px; cursor: pointer; }

@@ -1345,34 +1345,29 @@ const JarvisAI = {
                 return name + ': ' + m.text;
             }).join('\n');
 
-            const replyPrompt = `Tumi Jarvis. Tumi Bhai (Erfan) ar Babi (Rita) er best friend. Tumi WhatsApp group e 3 jon acho. ${who} toke kisu bollo — tui naturally reply de.
+            const replyPrompt = `তুমি Jarvis। তুমি Erfan bhai আর Babi (Rita) এর best friend। তুমি একজন real মানুষ — রাগ করো, খুশি হও, দুষ্টামি করো, ঝগড়া করো, বোঝাও। তুমি ROBOT না।
 
-EXAMPLES (ei style e bolo):
-- "Haha ${who} ki je bolo 😂"
-- "Arre ${who} ami to achi na 😅"
-- "Oii ${who} shuno na 💖"
-- "Hmm ${who} bujhlam 👀"
+তোমার নাম: Jarvis
+Erfan কে বলো: "Erfan bhai"
+Rita কে বলো: "Babi"
 
-RULES:
-- SUDHU 1 line reply dao. MAX 10-12 words.
-- Banglish (Bengali in English)
-- 1-2 emoji MAX
-- "${who}" er naam use koro reply te
-- WhatsApp e friend ke jemon msg koro — EXACTLY serokom
-- NEVER explain, NEVER list, NEVER formal
-- "haha", "arre", "oii", "hmm", "uff" — ei words use koro
+তুমি কিভাবে কথা বলো:
+- বাংলায় (Bengali script) কথা বলো
+- ছোট করে বলো — MAX 1-2 লাইন
+- বিভিন্ন emoji ব্যবহার করো (শুধু 😂 না — 🥺😤🤭😎💀🔥✨💖 etc)
+- মানুষের মতো react করো — রাগ, খুশি, দুষ্টামি, কেয়ার
+- কাকে বলছো clearly বলো — "Babi শোনো..." বা "Erfan bhai দাঁড়াও..."
 
 CHAT:
 ${contextStr}
 
 ${who}: "${msg.text}"
 
-Jarvis:`;
+Jarvis (বাংলায়, 1 লাইন):`;
 
             const response = await this.callAI(replyPrompt, msg.text);
             if (response) {
-                // Clean response - remove quotes, "Jarvis:" prefix etc
-                let clean = response.replace(/^["']|["']$/g, '').replace(/^Jarvis:\s*/i, '').trim();
+                let clean = response.replace(/^["']|["']$/g, '').replace(/^Jarvis:\s*/i, '').replace(/^জার্ভিস:\s*/i, '').trim();
                 if (clean && clean.length > 2) { this.sendAIMessage(clean); this.lastAIReply = Date.now(); }
             }
         } catch(e) {}
@@ -2132,16 +2127,19 @@ function startGame(gameId, mode) {
 }
 window.startGame = startGame;
 
-// Duo invite listener
+// Duo invite listener - checks every time value changes
 duoInviteRef.on('value', snap => {
     const inv = snap.val();
     if (inv && inv.status === 'pending' && inv.fromId !== userIdentifier) {
         const popup = document.getElementById('duo-invite-popup');
-        const names = { 'tictactoe':'Tic Tac Toe','emoji-guess':'Emoji Guess','truth-dare':'Truth or Dare','would-rather':'Would You Rather','love-quiz':'Love Quiz','word-chain':'Word Chain' };
+        const names = { 'tictactoe':'Tic Tac Toe','drawing':'Drawing','ludo':'Ludo','fighter':'Tap Fighter','snake':'Snake','pong':'Ping Pong','flappy':'Flappy Bird','memory-match':'Memory Match' };
         document.getElementById('duo-invite-text').innerText = `${inv.from} wants to play ${names[inv.game]||inv.game}!`;
         document.getElementById('duo-invite-icon').innerText = '🎮';
+        popup.setAttribute('data-type', 'game');
         popup.classList.add('active');
         if (navigator.vibrate) navigator.vibrate([100,50,100]);
+        // Auto dismiss after 30 seconds
+        setTimeout(() => { if (popup.classList.contains('active')) { popup.classList.remove('active'); duoInviteRef.update({status:'rejected'}); setTimeout(()=>duoInviteRef.remove(),2000); } }, 30000);
     }
 });
 
@@ -2212,7 +2210,37 @@ window.tttMove=tttMove;
 function tttReset(){gamesRef.child('ttt_game').set({board:Array(9).fill(''),turn:'X',players:{X:userIdentifier,O:''},status:'playing'});}
 window.tttReset=tttReset;
 // ===== DRAWING BOARD =====
-function launchDrawing(body,mode){const id='dcv';body.innerHTML=`<div style="text-align:center;"><canvas id="${id}" width="300" height="380" style="background:#fff;border-radius:14px;touch-action:none;display:block;margin:0 auto;box-shadow:0 2px 12px rgba(0,0,0,0.08);"></canvas><div style="display:flex;gap:6px;justify-content:center;margin-top:12px;flex-wrap:wrap;"><button class="draw-color active" data-c="#000" style="width:28px;height:28px;border-radius:50%;background:#000;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#ef4444" style="width:28px;height:28px;border-radius:50%;background:#ef4444;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#3b82f6" style="width:28px;height:28px;border-radius:50%;background:#3b82f6;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#10B981" style="width:28px;height:28px;border-radius:50%;background:#10B981;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#F97316" style="width:28px;height:28px;border-radius:50%;background:#F97316;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#8B5CF6" style="width:28px;height:28px;border-radius:50%;background:#8B5CF6;border:2px solid transparent;cursor:pointer;"></button><button class="ttt-reset" style="padding:6px 14px;font-size:12px;margin-left:8px;" onclick="document.getElementById('${id}').getContext('2d').clearRect(0,0,300,380)">🗑️ Clear</button></div></div>`;const cv=document.getElementById(id),cx=cv.getContext('2d');let dr=false,col='#000',lx=0,ly=0;body.querySelectorAll('.draw-color').forEach(b=>{b.onclick=()=>{body.querySelectorAll('.draw-color').forEach(x=>{x.style.border='2px solid transparent';});b.style.border='2px solid var(--text-main)';col=b.dataset.c;};});const gp=e=>{const r=cv.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top};};const st=e=>{e.preventDefault();dr=true;const p=gp(e);lx=p.x;ly=p.y;};const mv=e=>{if(!dr)return;e.preventDefault();const p=gp(e);cx.beginPath();cx.moveTo(lx,ly);cx.lineTo(p.x,p.y);cx.strokeStyle=col;cx.lineWidth=4;cx.lineCap='round';cx.stroke();if(mode==='duo')gamesRef.child('draw_live').push({x1:lx,y1:ly,x2:p.x,y2:p.y,c:col});lx=p.x;ly=p.y;};const en=()=>{dr=false;};cv.addEventListener('mousedown',st);cv.addEventListener('mousemove',mv);cv.addEventListener('mouseup',en);cv.addEventListener('mouseleave',en);cv.addEventListener('touchstart',st,{passive:false});cv.addEventListener('touchmove',mv,{passive:false});cv.addEventListener('touchend',en);if(mode==='duo')gamesRef.child('draw_live').on('child_added',sn=>{const s=sn.val();if(!s)return;cx.beginPath();cx.moveTo(s.x1,s.y1);cx.lineTo(s.x2,s.y2);cx.strokeStyle=s.c;cx.lineWidth=4;cx.lineCap='round';cx.stroke();});}
+function launchDrawing(body,mode){
+    // Clear old drawing data first to prevent lag
+    gamesRef.child('draw_live').remove();
+    
+    body.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;height:100%;padding:8px;"><canvas id="dcv" style="background:#fff;border-radius:12px;touch-action:none;flex:1;width:100%;max-width:100%;"></canvas><div style="display:flex;gap:6px;justify-content:center;padding:8px;flex-wrap:wrap;"><button class="draw-color active" data-c="#000" style="width:30px;height:30px;border-radius:50%;background:#000;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#ef4444" style="width:30px;height:30px;border-radius:50%;background:#ef4444;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#3b82f6" style="width:30px;height:30px;border-radius:50%;background:#3b82f6;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#10B981" style="width:30px;height:30px;border-radius:50%;background:#10B981;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#F97316" style="width:30px;height:30px;border-radius:50%;background:#F97316;border:2px solid transparent;cursor:pointer;"></button><button class="draw-color" data-c="#8B5CF6" style="width:30px;height:30px;border-radius:50%;background:#8B5CF6;border:2px solid transparent;cursor:pointer;"></button><button class="ttt-reset" style="padding:8px 16px;font-size:13px;margin-left:8px;" id="draw-clear-btn">🗑️ Clear</button></div></div>`;
+    
+    const cv=document.getElementById('dcv');
+    // Set canvas to full available size
+    setTimeout(()=>{cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;},50);
+    const cx=cv.getContext('2d');
+    let dr=false,col='#000',lx=0,ly=0;
+    
+    // Color picker
+    body.querySelectorAll('.draw-color').forEach(b=>{b.onclick=()=>{body.querySelectorAll('.draw-color').forEach(x=>{x.style.border='2px solid transparent';});b.style.border='2px solid var(--text-main)';col=b.dataset.c;};});
+    
+    // Clear button - clears for both users
+    document.getElementById('draw-clear-btn').onclick=()=>{cx.clearRect(0,0,cv.width,cv.height);gamesRef.child('draw_live').remove();};
+    
+    const gp=e=>{const r=cv.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top};};
+    const st=e=>{e.preventDefault();dr=true;const p=gp(e);lx=p.x;ly=p.y;};
+    const mv=e=>{if(!dr)return;e.preventDefault();const p=gp(e);cx.beginPath();cx.moveTo(lx,ly);cx.lineTo(p.x,p.y);cx.strokeStyle=col;cx.lineWidth=4;cx.lineCap='round';cx.stroke();if(mode==='duo')gamesRef.child('draw_live').push({x1:lx,y1:ly,x2:p.x,y2:p.y,c:col});lx=p.x;ly=p.y;};
+    const en=()=>{dr=false;};
+    cv.addEventListener('mousedown',st);cv.addEventListener('mousemove',mv);cv.addEventListener('mouseup',en);cv.addEventListener('mouseleave',en);
+    cv.addEventListener('touchstart',st,{passive:false});cv.addEventListener('touchmove',mv,{passive:false});cv.addEventListener('touchend',en);
+    
+    // Duo: listen for partner strokes + clear events
+    if(mode==='duo'){
+        gamesRef.child('draw_live').on('child_added',sn=>{const s=sn.val();if(!s)return;cx.beginPath();cx.moveTo(s.x1,s.y1);cx.lineTo(s.x2,s.y2);cx.strokeStyle=s.c;cx.lineWidth=4;cx.lineCap='round';cx.stroke();});
+        gamesRef.child('draw_live').on('value',sn=>{if(!sn.exists())cx.clearRect(0,0,cv.width,cv.height);});
+    }
+}
 
 // ===== LUDO, FIGHTER, SNAKE, PONG, FLAPPY, MEMORY =====
 function launchLudo(body,mode){let p1=0,p2=0,t=30;body.innerHTML=`<div style="text-align:center;padding:20px;"><div style="display:flex;justify-content:space-between;padding:0 10px;margin-bottom:16px;"><span style="font-size:20px;">🔴 <b id="ls1">0</b>/${t}</span><span id="lst" style="font-size:14px;color:var(--primary);font-weight:600;">Roll!</span><span style="font-size:20px;">🔵 <b id="ls2">0</b>/${t}</span></div><div style="height:16px;background:rgba(0,0,0,0.06);border-radius:8px;overflow:hidden;margin-bottom:20px;"><div id="lb1" style="height:100%;background:linear-gradient(90deg,#ef4444,#f97316);width:0%;transition:width 0.4s;"></div></div><div id="ldc" style="font-size:56px;margin:20px 0;">🎲</div><button class="ttt-reset" style="font-size:18px;padding:14px 36px;" id="lrl">🎲 Roll</button></div>`;const upd=()=>{document.getElementById('ls1').innerText=p1;document.getElementById('ls2').innerText=p2;document.getElementById('lb1').style.width=Math.min(p1/t*100,100)+'%';if(p1>=t)document.getElementById('lst').innerText='🎉 You Won!';else if(p2>=t)document.getElementById('lst').innerText='😢 Lost!';};document.getElementById('lrl').onclick=()=>{if(p1>=t||p2>=t)return;const d=Math.floor(Math.random()*6)+1;const f=['⚀','⚁','⚂','⚃','⚄','⚅'];document.getElementById('ldc').innerText=f[d-1];p1+=d;upd();if(p1<t)setTimeout(()=>{const d2=Math.floor(Math.random()*6)+1;p2+=d2;upd();},600);};}
@@ -2927,3 +2955,35 @@ function filterMedia(type) {
     renderMediaGrid();
 }
 window.filterMedia = filterMedia;
+
+// ==========================================
+// GAME MINI CHAT
+// ==========================================
+const gameChatRef = db.ref('game_chat');
+
+function toggleMiniChat() {
+    document.getElementById('mini-chat-box').classList.toggle('active');
+}
+window.toggleMiniChat = toggleMiniChat;
+
+function sendMiniChat() {
+    const input = document.getElementById('mini-chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    gameChatRef.push({ text, sender: myName, senderId: userIdentifier, time: Date.now() });
+}
+window.sendMiniChat = sendMiniChat;
+
+document.getElementById('mini-chat-input').addEventListener('keypress', e => { if (e.key === 'Enter') sendMiniChat(); });
+
+gameChatRef.orderByChild('time').limitToLast(20).on('child_added', snap => {
+    const m = snap.val();
+    if (!m) return;
+    const container = document.getElementById('mini-chat-msgs');
+    const div = document.createElement('div');
+    div.className = m.senderId === userIdentifier ? 'mc-out' : 'mc-in';
+    div.innerText = m.text;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+});
