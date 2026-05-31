@@ -565,6 +565,10 @@ async function sendFirebaseMessage(text, type='text', mediaDataURL=null, duratio
 function renderMessage(msg, key, prepend=false) {
     if(renderedMsgs.has(key)) return; 
     renderedMsgs.add(key);
+    
+    // Skip locally hidden messages
+    const hiddenMsgs = JSON.parse(localStorage.getItem('hiddenMsgs') || '[]');
+    if (hiddenMsgs.includes(key)) return;
 
     // Route AI messages to special renderer
     if (msg.senderId === AI_ID || msg.isAI) {
@@ -786,8 +790,7 @@ function attachInteractions(element) {
         longPressTimer = setTimeout(() => { 
             if (!isSwiping && !isScrolling) { 
                 selectedMsgElement = element; 
-                if (isOut) { document.getElementById('btn-delete').style.display = 'flex'; } 
-                else { document.getElementById('btn-delete').style.display = 'none'; }
+                document.getElementById('btn-delete').style.display = 'flex';
                 document.getElementById('overlay').classList.add('active'); document.getElementById('context-menu').classList.add('active'); 
             } 
         }, 400);
@@ -825,7 +828,28 @@ function attachInteractions(element) {
 }
 
 document.getElementById('btn-delete').addEventListener('click', () => {
-    closeAllMenus(); if (selectedMsgElement && selectedMsgElement.classList.contains('out')) { messagesRef.child(selectedMsgElement.id).remove(); }
+    closeAllMenus();
+    if (!selectedMsgElement) return;
+    const msgId = selectedMsgElement.id;
+    const isMyMsg = selectedMsgElement.classList.contains('out');
+    const isAIMsg = selectedMsgElement.classList.contains('ai-message');
+    const isOwner = myEmail.toLowerCase() === 'erfanbnp99@gmail.com';
+    
+    // Owner can delete AI messages permanently
+    if (isAIMsg && isOwner) {
+        messagesRef.child(msgId).remove();
+        return;
+    }
+    // Delete own messages for everyone
+    if (isMyMsg) {
+        messagesRef.child(msgId).remove();
+        return;
+    }
+    // Delete friend's message for me only (hide locally)
+    selectedMsgElement.style.display = 'none';
+    let hiddenMsgs = JSON.parse(localStorage.getItem('hiddenMsgs') || '[]');
+    hiddenMsgs.push(msgId);
+    localStorage.setItem('hiddenMsgs', JSON.stringify(hiddenMsgs));
 });
 
 document.getElementById('btn-reply').addEventListener('click', () => {
@@ -1317,20 +1341,49 @@ const JarvisAI = {
         this.isProcessing = true;
         try {
             const who = isFromOwner ? 'Bhai' : 'Babi';
-            const contextStr = this.contextBuffer.slice(-6).map(m => {
-                const name = m.sender === 'owner' ? 'Erfan' : (m.sender === 'jarvis' ? 'Jarvis' : 'Rita');
+            const contextStr = this.contextBuffer.slice(-8).map(m => {
+                const name = m.sender === 'owner' ? 'Bhai' : (m.sender === 'jarvis' ? 'Jarvis' : 'Babi');
                 return name + ': ' + m.text;
             }).join('\n');
 
-            const prompt = `Tumi Jarvis. ${who} tomar somporke kisu bollo ba toke mention korlo. Tumi naturally react koro — jemon friend kore jokhon tar somporke kisu bola hoy. Banglish, 1-2 line, emoji.
+            // Step 1: AI THINKS first — should I respond? What's the context?
+            const thinkPrompt = `Tumi Jarvis. Nicher chat ta dekho ar decide koro:
+1. Tomar reply dewa ki appropriate? (haan/na)
+2. Ke tomar sate kota bolce? (Bhai na Babi)
+3. Tumi kake bolcho? (Bhai/Babi/dujon ke)
+4. Ki tone e bolbe? (funny/caring/calm/excited)
+
+Chat:
+${contextStr}
+${who} bollo: "${msg.text}"
+
+Answer in 1 line format: [haan/na] [kake bolcho: Bhai/Babi/dujon] [tone]`;
+
+            const thinkResult = await this.callAI(thinkPrompt, msg.text);
+            
+            // If AI decides not to respond, skip
+            if (thinkResult && thinkResult.toLowerCase().includes('na')) {
+                this.isProcessing = false;
+                return;
+            }
+
+            // Step 2: Generate actual response with context of who AI is talking to
+            const replyPrompt = `Tumi Jarvis — Bhai ar Babi er friend. ${who} tomar somporke ba toke kisu bollo. Tumi naturally reply dao.
+
+IMPORTANT:
+- Tumi jodi Babi ke bolcho — "Babi" bolo clearly
+- Tumi jodi Bhai ke bolcho — "Bhai" bolo clearly  
+- Jemon: "Haha Babi ami to tomar friend 😂" or "Bhai chill koro 😅"
+- 1-2 line MAX, Banglish, emoji
+- Real friend er moto bolo
 
 Chat:
 ${contextStr}
 
 ${who} bollo: "${msg.text}"
-Tumi react/reply koro (1-2 line):`;
+Tumi bolbe:`;
 
-            const response = await this.callAI(prompt, msg.text);
+            const response = await this.callAI(replyPrompt, msg.text);
             if (response) { this.sendAIMessage(response); this.lastAIReply = Date.now(); }
         } catch(e) {}
         this.isProcessing = false;
@@ -1365,7 +1418,7 @@ Tumi react/reply koro (1-2 line):`;
 
         try {
             const contextStr = this.contextBuffer.map(m =>
-                `${m.sender === 'owner' ? 'Erfan' : 'Rita'}: ${m.text}`
+                `${m.sender === 'owner' ? 'Bhai' : 'Babi'}: ${m.text}`
             ).join('\n');
 
             const memoryStr = Object.entries(this.memory).map(([k, v]) => `${k}: ${v}`).join(', ');
@@ -1438,7 +1491,7 @@ Erfan reply dicce na. Tumi naturally bolo (1-2 line, Banglish):`;
         try {
             const isOwner = senderId === this.getOwnerKey();
             const contextStr = this.contextBuffer.slice(-8).map(m =>
-                `${m.sender === 'owner' ? 'Erfan' : 'Rita'}: ${m.text}`
+                `${m.sender === 'owner' ? 'Bhai' : 'Babi'}: ${m.text}`
             ).join('\n');
 
             const systemPrompt = `Tumi Jarvis — Erfan ar Rita er friend. Tumi real manush er moto kota bolo Banglish e.
@@ -1472,7 +1525,7 @@ Tumi ki bolbe (Banglish, short):`;
 
         try {
             const contextStr = this.contextBuffer.slice(-8).map(m =>
-                `${m.sender === 'owner' ? 'Erfan' : 'Rita'}: ${m.text}`
+                `${m.sender === 'owner' ? 'Bhai' : 'Babi'}: ${m.text}`
             ).join('\n');
 
             const systemPrompt = `Tumi Jarvis — private mode e ace. Eta PRIVATE — shudhu je ask korce shei dekhbe. Banglish e reply dao.
@@ -1513,7 +1566,7 @@ Reply (Banglish, short, helpful):`;
         if (Date.now() - lastWhisper < 300000) return; // 5 min cooldown
 
         const contextStr = this.contextBuffer.slice(-5).map(m =>
-            `${m.sender === 'owner' ? 'Erfan' : 'Rita'}: ${m.text}`
+            `${m.sender === 'owner' ? 'Bhai' : 'Babi'}: ${m.text}`
         ).join('\n');
 
         let prompt;
@@ -1774,7 +1827,7 @@ Reply (Banglish, short, helpful):`;
         this.isProcessing = true;
         try {
             const contextStr = this.contextBuffer.slice(-8).map(m =>
-                `${m.sender === 'owner' ? 'Erfan' : 'Rita'}: ${m.text}`
+                `${m.sender === 'owner' ? 'Bhai' : 'Babi'}: ${m.text}`
             ).join('\n');
 
             const prompt = `Tumi Erfan ar Rita er friend group e acho. Tumi chat dekhcho ar tomar mone hocce kisu bolte chao — jemon real friend group e keu kisu bole. Banglish e 1 line bolo. Natural, funny, caring. Erfan = "Bhai", Rita = "Babi". Tumi robot na — tumi friend.
@@ -1800,7 +1853,7 @@ Tumi naturally ki bolbe? (1 line only, Banglish):`;
         try {
             const who = isFromOwner ? 'Bhai (Erfan)' : 'Babi (Rita)';
             const contextStr = this.contextBuffer.slice(-6).map(m => {
-                const name = m.sender === 'owner' ? 'Erfan' : (m.sender === 'jarvis' ? 'Jarvis' : 'Rita');
+                const name = m.sender === 'owner' ? 'Bhai' : (m.sender === 'jarvis' ? 'Jarvis' : 'Babi');
                 return name + ': ' + m.text;
             }).join('\n');
 
@@ -2481,7 +2534,7 @@ async function sendChatbotMsg() {
     try {
         // Get recent main chat context for AI awareness
         const mainChatContext = JarvisAI.contextBuffer.slice(-5).map(m => {
-            const name = m.sender === 'owner' ? 'Erfan' : (m.sender === 'jarvis' ? 'Jarvis' : 'Rita');
+            const name = m.sender === 'owner' ? 'Bhai' : (m.sender === 'jarvis' ? 'Jarvis' : 'Babi');
             return name + ': ' + m.text;
         }).join('\n');
 
