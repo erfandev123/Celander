@@ -231,6 +231,10 @@ function enterChat() {
     document.getElementById('chat-app').style.display = 'flex';
     updatePCSidebars();
     initChat();
+    // Re-init Jarvis (handles both fresh init & listener re-attach after initChat cleanup)
+    if (window.Jarvis && typeof window.Jarvis.init === 'function') {
+        setTimeout(() => window.Jarvis.init(), 500);
+    }
     // Initialize UI only - new Jarvis (jarvis.js) handles AI logic
     setTimeout(() => {
         if (typeof createAIPanelUI === 'function') createAIPanelUI();
@@ -1916,7 +1920,7 @@ function createAIPanelUI() {
             <div class="ai-panel-body">
                 <div class="ai-panel-section">
                     <div class="ai-panel-label">Status</div>
-                    <div class="ai-panel-value" id="ai-status-indicator">${JarvisAI.enabled ? '🟢 Active' : '🔴 Disabled'}</div>
+                    <div class="ai-panel-value" id="ai-status-indicator">${window.Jarvis && window.Jarvis.enabled ? '🟢 Active' : JarvisAI.enabled ? '🟢 Active' : '🔴 Disabled'}</div>
                 </div>
                 <div class="ai-panel-section">
                     <div class="ai-panel-label">Owner Status</div>
@@ -1948,12 +1952,13 @@ function toggleAIPanel() {
 window.toggleAIPanel = toggleAIPanel;
 
 function toggleAIEnabled() {
-    JarvisAI.enabled = !JarvisAI.enabled;
-    aiSettingsRef.child('enabled').set(JarvisAI.enabled);
+    const target = window.Jarvis || JarvisAI;
+    target.enabled = !target.enabled;
+    aiSettingsRef.child('enabled').set(target.enabled);
     const indicator = document.getElementById('ai-status-indicator');
-    if (indicator) indicator.innerText = JarvisAI.enabled ? '🟢 Active' : '🔴 Disabled';
+    if (indicator) indicator.innerText = target.enabled ? '🟢 Active' : '🔴 Disabled';
     const btn = document.querySelector('.ai-toggle-btn');
-    if (btn) btn.innerText = JarvisAI.enabled ? 'Disable AI' : 'Enable AI';
+    if (btn) btn.innerText = target.enabled ? 'Disable AI' : 'Enable AI';
 }
 window.toggleAIEnabled = toggleAIEnabled;
 
