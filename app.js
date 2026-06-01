@@ -27,7 +27,7 @@ const AI_ID = 'jarvis_ai_assistant';
 const AI_CONFIG = {
     apiUrl: 'https://coai.drawaspark.com/v1/chat/completions',
     apiKey: 'sk-233b0903d158fd6c5a2bf2804ddd847b40677b3eb442649b4a8307e62676125a',
-    model: 'gpt-5-nano',
+    model: 'deepseek-v4-flash',
     ownerEmail: 'erfanbnp99@gmail.com',
     partnerEmail: 'rita@gmail.com'
 };
@@ -36,7 +36,7 @@ const AI_CONFIG = {
 const API2 = {
     url: 'https://coai.drawaspark.com/v1/chat/completions',
     key: 'sk-254a3eb593bd1b83f57ca03d7869aaff625f657e7be5e8a3657aff2c11e5a851',
-    model: 'gpt-5-nano'
+    model: 'deepseek-v4-flash'
 };
 
 // AUTH & IDENTIFICATION (Gmail + Name SignUp)
@@ -231,13 +231,9 @@ function enterChat() {
     document.getElementById('chat-app').style.display = 'flex';
     updatePCSidebars();
     initChat();
-    // Initialize AI Assistant after chat loads
+    // Initialize UI only - new Jarvis (jarvis.js) handles AI logic
     setTimeout(() => {
-        if (typeof JarvisAI !== 'undefined') {
-            JarvisAI.init();
-            JarvisAI.startDryChatCheck();
-            if (typeof createAIPanelUI === 'function') createAIPanelUI();
-        }
+        if (typeof createAIPanelUI === 'function') createAIPanelUI();
         // Request notification permission ONLY for owner
         if (myEmail.toLowerCase() === 'erfanbnp99@gmail.com') {
             if ('Notification' in window && Notification.permission === 'default') {
@@ -1608,7 +1604,7 @@ Reply (Banglish, short, helpful):`;
     async callAI(systemPrompt, userMsg) {
         // Primary + multiple backup APIs
         const apis = [
-            { url: 'https://coai.drawaspark.com/v1/chat/completions', key: 'sk-233b0903d158fd6c5a2bf2804ddd847b40677b3eb442649b4a8307e62676125a', model: 'gpt-5-nano' },
+            { url: 'https://coai.drawaspark.com/v1/chat/completions', key: 'sk-233b0903d158fd6c5a2bf2804ddd847b40677b3eb442649b4a8307e62676125a', model: 'deepseek-v4-flash' },
             { url: 'https://api.chatanywhere.tech/v1/chat/completions', key: 'sk-8BjkBkiMha9hOrMddv3X6Fd4OsyZexO7CTaMgt8F7Y7Cn33G', model: 'gpt-4o-mini' },
             { url: 'https://api.chatanywhere.tech/v1/chat/completions', key: 'sk-y5qoc2c6pREhb8kWhCRYB2rqd0MnxIwIhqa671L4PtjpGepd', model: 'gpt-4o-mini' },
             { url: 'https://api.chatanywhere.tech/v1/chat/completions', key: 'sk-msUYNSt02SD8dERk5tWxZcnwZOXmayviGqyxADJtOXPIgiHo', model: 'gpt-4o-mini' }
