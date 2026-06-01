@@ -207,8 +207,11 @@ const Jarvis = {
     maxContext: 15,
     lastReply: 0,
     isProcessing: false,
+    _messageQueue: [],
+    _queueBusy: false,
     pendingTimers: new Set(),
     _processedKeys: new Set(),
+    _repliedKeys: new Set(),
     memory: {},
     ownerStatus: '',
     ownerOnline: false,
@@ -251,12 +254,16 @@ const Jarvis = {
     init() {
         if (!this.isAuthorized()) return;
         if (this._initialized) {
-            // Already initialized - just re-attach message watcher (killed by initChat)
+            // Already initialized - re-attach watcher (was killed by initChat)
+            // Don't clear _processedKeys — prevents re-processing old messages
             this._watchingMessages = false;
             this.watchMessages();
             return;
         }
         this._initialized = true;
+        this._processedKeys = new Set(); // fresh page load — no processed keys yet
+        this._repliedKeys = new Set();
+        this._cleanStaleLocks();
         console.log('[Jarvis] Initialized for', myEmail);
         loadLearnedData();
         this.loadContextFromMemory();
@@ -388,21 +395,8 @@ const Jarvis = {
         });
     },
 
-    // Show which API model replied (owner only)
-    notifyAPIReply() {
-        if ((myEmail || '').toLowerCase() !== JARVIS_OWNER) return;
-        const idx = this.lastAPIUsed;
-        if (idx < 0 || !JARVIS_APIS[idx]) return;
-        const api = JARVIS_APIS[idx];
-        const existing = document.getElementById('jarvis-api-toast');
-        if (existing) existing.remove();
-        const el = document.createElement('div');
-        el.id = 'jarvis-api-toast';
-        el.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#fff;padding:5px 12px;border-radius:8px;font-size:11px;z-index:9999;white-space:nowrap;pointer-events:none;';
-        el.innerText = `🤖 API ${idx+1} • ${api.model}`;
-        document.body.appendChild(el);
-        setTimeout(() => el.remove(), 3000);
-    }
+    // Store API model name so renderAIMessageInline can show it on the bubble
+    _lastApiModel: '',
 };
 
 // ==========================================
@@ -410,10 +404,9 @@ const Jarvis = {
 // ==========================================
 Jarvis.watchMessages = function() {
     if (!this.enabled) return;
-    // Clear processed keys so existing messages can be re-processed on re-attach
-    this._processedKeys = new Set();
     if (this._watchingMessages) return;
     this._watchingMessages = true;
+    // processedKeys cleared in init() only, NOT here — prevents re-trigger on re-attach
     messagesRef.orderByChild('timestamp').limitToLast(1).on('child_added', snap => {
         const msg = snap.val();
         const msgKey = snap.key;
@@ -446,16 +439,17 @@ Jarvis.watchMessages = function() {
         // Save to persistent memory
         this.saveContextToMemory();
 
-        // ALREADY PROCESSING? Skip all triggers (prevents double reply)
-        if (this.isProcessing) return;
-
-        // Reply to AI message → always respond
+        // Reply to AI message → enqueue (queue processes one at a time)
         if (msg.replyToId) {
             const replyEl = document.getElementById(msg.replyToId);
             if (replyEl && replyEl.classList.contains('ai-message')) {
-                this.pendingTimers.forEach(t => clearTimeout(t));
-                this.pendingTimers.clear();
-                setTimeout(() => this.respondToReply(msg, isFromOwner, msgKey), 1500);
+                this._enqueue(async () => {
+                    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
+                    // Atomic lock — stays claimed for 5 min (stale cleanup handles it)
+                    // Other tabs that see same msgKey will fail to claim → skip
+                    if (!await this._claimMsgLock(msgKey)) return;
+                    await this.respondToReply(msg, isFromOwner, msgKey);
+                });
                 return;
             }
         }
@@ -463,41 +457,74 @@ Jarvis.watchMessages = function() {
         // /jarvis command - public
         if (msg.type === 'text' && msg.text && msg.text.toLowerCase().startsWith('/jarvis')) {
             const query = msg.text.substring(7).trim();
-            if (query) { this.directChat(query, msg.senderId); }
+            if (query) {
+                this._enqueue(async () => {
+                    await new Promise(r => setTimeout(r, 800 + Math.random() * 600));
+                    if (!await this._claimMsgLock(msgKey)) return;
+                    await this.directChat(query, msg.senderId);
+                });
+            }
             return;
         }
 
         // Skip /ai (handled separately at send button)
         if (msg.type === 'text' && msg.text && msg.text.startsWith('/ai')) return;
 
-        // Direct mention - respond (skip if already processing)
+        // Direct mention - respond
         if (msg.text) {
             const lower = msg.text.toLowerCase();
             const mention = lower.includes('jarvis') || msg.text.includes('জার্ভিস') || msg.text.includes('জারভিস') ||
                 lower.includes('jarbis') || lower.includes('jarbi') || lower.includes('jarbes') ||
                 lower.includes('jarvi') || lower.includes('যারভিস') || lower.includes('যার্ভিস');
             if (mention) {
-                setTimeout(() => this.respondToMention(msg, isFromOwner, msgKey), 1500);
+                this._enqueue(async () => {
+                    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
+                    if (!await this._claimMsgLock(msgKey)) return;
+                    await this.respondToMention(msg, isFromOwner, msgKey);
+                });
                 return;
             }
         }
 
         // Owner offline + partner sent message → reply after delay
         if (isFromPartner && !this.isOwnerActive()) {
-            const delay = 120000 + Math.random() * 360000;
-            this.scheduleReply(() => this.offlineReply(msg, msgKey), delay);
+            this._enqueue(async () => {
+                await new Promise(r => setTimeout(r, 120000 + Math.random() * 360000));
+                if (!await this._claimMsgLock(msgKey)) return;
+                await this.offlineReply(msg, msgKey);
+            });
             return;
         }
 
         // Random join (rare, 8%, 10min cooldown, 5+ msgs)
         if (Date.now() - this.lastReply > 600000 && this.contextBuffer.length >= 5 && Math.random() < 0.08) {
-            this.scheduleReply(() => this.joinConversation(), 8000 + Math.random() * 12000);
+            this._enqueue(async () => {
+                await new Promise(r => setTimeout(r, 8000 + Math.random() * 12000));
+                await this.joinConversation();
+            });
         }
     });
 };
 
 Jarvis.isOwnerActive = function() {
     return this.ownerOnline && (Date.now() - this.ownerLastActive) < 180000;
+};
+
+// Cross-instance lock: atomically claim a message in Firebase
+// Only one tab/page wins — others skip (prevents duplicate replies across open tabs)
+Jarvis._claimMsgLock = async function(msgKey) {
+    try {
+        const lockRef = db.ref('jarvis_locks/' + msgKey);
+        const now = Date.now();
+        const result = await lockRef.transaction(current => {
+            // No lock → claim it
+            if (current === null) return now;
+            // Lock exists but is stale (>2 min) → reclaim
+            if (typeof current === 'number' && now - current > 120000) return now;
+            return; // abort — another instance holds the lock
+        });
+        return !!result.committed;
+    } catch(e) { return true; } // if lock fails, allow to avoid false negatives
 };
 
 // Schedule reply with deduplication
@@ -510,6 +537,50 @@ Jarvis.scheduleReply = function(fn, delay) {
     this.pendingTimers.add(timer);
 };
 
+// Clean up stale locks (crashed tabs that never released)
+Jarvis._cleanStaleLocks = function() {
+    const lockRef = db.ref('jarvis_locks');
+    lockRef.once('value', snap => {
+        if (!snap.exists()) return;
+        const now = Date.now();
+        const updates = {};
+        let count = 0;
+        snap.forEach(child => {
+            if (typeof child.val() === 'number' && now - child.val() > 120000) {
+                updates[child.key] = null;
+                count++;
+            }
+        });
+        if (count > 0) lockRef.update(updates);
+    });
+};
+
+// Periodic stale lock cleanup (every 2 min)
+setInterval(() => {
+    if (window.Jarvis && window.Jarvis._cleanStaleLocks) window.Jarvis._cleanStaleLocks();
+}, 120000);
+
+// Queue system — processes one reply at a time (prevents multiple simultaneous replies)
+Jarvis._enqueue = function(fn) {
+    // Limit queue to 3 items to prevent backlog
+    if (this._messageQueue.length >= 3) return;
+    this._messageQueue.push(fn);
+    if (!this._queueBusy) this._processQueue();
+};
+
+Jarvis._processQueue = async function() {
+    if (this._queueBusy) return;
+    this._queueBusy = true;
+    this.isProcessing = true;
+    while (this._messageQueue.length > 0) {
+        const fn = this._messageQueue.shift();
+        try { await fn(); } catch(e) {}
+        await new Promise(r => setTimeout(r, 800));
+    }
+    this.isProcessing = false;
+    this._queueBusy = false;
+};
+
 // ==========================================
 // AI ACTIONS (all use unified prompt)
 // ==========================================
@@ -517,7 +588,18 @@ Jarvis.scheduleReply = function(fn, delay) {
 // Send AI message with typing indicator (returns Promise so isProcessing stays true until sent)
 Jarvis.sendMessage = async function(text, replyToId, replyToText) {
     if (!text || text.length < 2) return;
-    
+
+    // 🛡️ ULTIMATE DEDUP: If this msgKey was already replied to, skip completely
+    if (replyToId) {
+        const dedupKey = '↩' + replyToId;
+        if (this._repliedKeys.has(dedupKey)) return;
+        this._repliedKeys.add(dedupKey);
+        if (this._repliedKeys.size > 100) {
+            const arr = [...this._repliedKeys].slice(-50);
+            this._repliedKeys = new Set(arr);
+        }
+    }
+
     // Quality check the message before sending (uses backup API)
     const finalText = await jarvisQualityCheck(text);
     
@@ -528,6 +610,7 @@ Jarvis.sendMessage = async function(text, replyToId, replyToText) {
     await new Promise(resolve => {
         setTimeout(() => {
             db.ref('typing/jarvis_ai').remove();
+            const apiModel = (this.lastAPIUsed >= 0 && JARVIS_APIS[this.lastAPIUsed]) ? JARVIS_APIS[this.lastAPIUsed].model : '';
             const data = {
                 senderId: JARVIS_ID,
                 senderName: 'Jarvis',
@@ -536,12 +619,12 @@ Jarvis.sendMessage = async function(text, replyToId, replyToText) {
                 type: 'ai',
                 seen: false,
                 isAI: true,
+                apiModel: apiModel,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
             };
             if (replyToId) { data.replyToId = replyToId; data.replyToText = replyToText || ''; }
             messagesRef.push(data);
             this.lastReply = Date.now();
-            this.notifyAPIReply();
             resolve();
         }, 800 + Math.random() * 1200);
     });
@@ -549,8 +632,6 @@ Jarvis.sendMessage = async function(text, replyToId, replyToText) {
 
 // 1. Respond to direct mention + set replyToId
 Jarvis.respondToMention = async function(msg, isFromOwner, msgKey) {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
     try {
         const who = isFromOwner ? 'Erfan bhai' : 'Babi';
         const sysPrompt = buildSystemPrompt({
@@ -563,13 +644,10 @@ Jarvis.respondToMention = async function(msg, isFromOwner, msgKey) {
         const reply = await jarvisCallAPI(sysPrompt, userMsg, 120);
         if (reply) await this.sendMessage(reply, msgKey, msg.text);
     } catch(e) {}
-    this.isProcessing = false;
 };
 
 // 2. Respond when someone replies to AI message + set replyToId
 Jarvis.respondToReply = async function(msg, isFromOwner, msgKey) {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
     try {
         const who = isFromOwner ? 'Erfan bhai' : 'Babi';
         const sysPrompt = buildSystemPrompt({
@@ -581,13 +659,10 @@ Jarvis.respondToReply = async function(msg, isFromOwner, msgKey) {
         const reply = await jarvisCallAPI(sysPrompt, userMsg, 120);
         if (reply) await this.sendMessage(reply, msgKey, msg.text);
     } catch(e) {}
-    this.isProcessing = false;
 };
 
 // 3. /jarvis command - public chat
 Jarvis.directChat = async function(query, senderId) {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
     try {
         const isOwner = senderId === this.getOwnerKey();
         const who = isOwner ? 'Erfan bhai' : 'Babi';
@@ -599,13 +674,10 @@ Jarvis.directChat = async function(query, senderId) {
         const reply = await jarvisCallAPI(sysPrompt, userMsg, 150);
         if (reply) await this.sendMessage(reply);
     } catch(e) {}
-    this.isProcessing = false;
 };
 
 // 4. /ai private command - only sender sees
 Jarvis.privateChat = async function(query) {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
     try {
         const sysPrompt = buildSystemPrompt({
             contextStr: this.buildContext(6),
@@ -624,15 +696,12 @@ Jarvis.privateChat = async function(query) {
             }
         }
     } catch(e) {}
-    this.isProcessing = false;
 };
 
 // 5. Offline reply - when owner not responding
 Jarvis.offlineReply = async function(triggerMsg, msgKey) {
-    if (this.isProcessing) return;
-    if (this.isOwnerActive()) return;
-    this.isProcessing = true;
     try {
+        if (this.isOwnerActive()) return;
         const sysPrompt = buildSystemPrompt({
             contextStr: this.buildContext(10),
             ownerStatus: this.ownerStatus,
@@ -646,14 +715,12 @@ Jarvis.offlineReply = async function(triggerMsg, msgKey) {
             this.updateMemoryFromMsg(triggerMsg);
         }
     } catch(e) {}
-    this.isProcessing = false;
 };
 
 // 6. Join conversation as 3rd friend
 Jarvis.joinConversation = async function() {
-    if (this.isProcessing || Date.now() - this.lastReply < 300000) return;
-    this.isProcessing = true;
     try {
+        if (Date.now() - this.lastReply < 300000) return;
         const sysPrompt = buildSystemPrompt({
             contextStr: this.buildContext(8)
         });
@@ -661,7 +728,6 @@ Jarvis.joinConversation = async function() {
         const reply = await jarvisCallAPI(sysPrompt, userMsg, 100);
         if (reply) await this.sendMessage(reply);
     } catch(e) {}
-    this.isProcessing = false;
 };
 
 // ==========================================

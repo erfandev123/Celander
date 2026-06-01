@@ -1971,13 +1971,21 @@ function renderAIMessageInline(msg, key, prepend) {
     msgRow.id = key;
     msgRow.setAttribute('data-text', msg.text || '');
 
+    let replyHTML = '';
+    if (msg.replyToText) {
+        replyHTML = `<div class="reply-bubble-outside" onclick="scrollToMessage('${msg.replyToId}')">${msg.replyToText.substring(0, 35)}${msg.replyToText.length > 35 ? '...' : ''}</div>`;
+    }
+
     const bubbleContent = (msg.text || '').replace(/\n/g, '<br>');
     const privateLabel = msg.isPrivate ? '<span class="ai-private-badge">Private</span>' : '';
+    // Show API model for owner (stored in Firebase as apiModel field)
+    const apiBadge = (msg.apiModel && myEmail && myEmail.toLowerCase() === 'erfanbnp99@gmail.com')
+        ? `<span class="ai-api-badge">${msg.apiModel}</span>` : '';
 
     msgRow.innerHTML = `
         <div class="ai-avatar">🤖</div>
         <div class="swipe-action-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="var(--primary)"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg></div>
-        <div class="bubble ai-bubble">${bubbleContent}<span class="ai-badge">AI</span>${privateLabel}</div>
+        <div class="bubble ai-bubble">${replyHTML}${bubbleContent}<span class="ai-badge">AI</span>${apiBadge}${privateLabel}</div>
     `;
 
     if (prepend) {
