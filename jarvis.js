@@ -207,6 +207,7 @@ const Jarvis = {
     maxContext: 15,
     lastReply: 0,
     isProcessing: false,
+    _initTime: 0,
     _messageQueue: [],
     _queueBusy: false,
     pendingTimers: new Set(),
@@ -263,6 +264,7 @@ const Jarvis = {
         this._initialized = true;
         this._processedKeys = new Set(); // fresh page load — no processed keys yet
         this._repliedKeys = new Set();
+        this._initTime = Date.now(); // ignore messages sent before this session
         this._cleanStaleLocks();
         console.log('[Jarvis] Initialized for', myEmail);
         loadLearnedData();
@@ -412,6 +414,9 @@ Jarvis.watchMessages = function() {
         const msgKey = snap.key;
         if (!msg || msg.senderId === JARVIS_ID) return;
 
+        // Skip old messages (from previous sessions, not current one)
+        if (msg.timestamp && this._initTime > 0 && msg.timestamp < this._initTime - 30000) return;
+
         // Skip if already processed (prevents re-trigger on delete)
         if (this._processedKeys.has(msgKey)) return;
         this._processedKeys.add(msgKey);
@@ -439,15 +444,26 @@ Jarvis.watchMessages = function() {
         // Save to persistent memory
         this.saveContextToMemory();
 
-        // Reply to AI message → enqueue (queue processes one at a time)
+        // Reply to AI message → always respond if reply targets Jarvis
         if (msg.replyToId) {
+            let isAITarget = false;
             const replyEl = document.getElementById(msg.replyToId);
             if (replyEl && replyEl.classList.contains('ai-message')) {
+                isAITarget = true;
+            } else {
+                // DOM element might not exist (old msg) — check Firebase
+                try {
+                    const origSnap = await db.ref('messages/' + msg.replyToId).once('value');
+                    const origMsg = origSnap.val();
+                    if (origMsg && (origMsg.senderId === JARVIS_ID || origMsg.isAI || origMsg.senderName === 'Jarvis')) {
+                        isAITarget = true;
+                    }
+                } catch(e) {}
+            }
+            if (isAITarget) {
                 this._enqueue(async () => {
-                    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
-                    // Atomic lock — stays claimed for 5 min (stale cleanup handles it)
-                    // Other tabs that see same msgKey will fail to claim → skip
                     if (!await this._claimMsgLock(msgKey)) return;
+                    await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
                     await this.respondToReply(msg, isFromOwner, msgKey);
                 });
                 return;
@@ -459,8 +475,8 @@ Jarvis.watchMessages = function() {
             const query = msg.text.substring(7).trim();
             if (query) {
                 this._enqueue(async () => {
-                    await new Promise(r => setTimeout(r, 800 + Math.random() * 600));
                     if (!await this._claimMsgLock(msgKey)) return;
+                    await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
                     await this.directChat(query, msg.senderId);
                 });
             }
@@ -478,8 +494,8 @@ Jarvis.watchMessages = function() {
                 lower.includes('jarvi') || lower.includes('যারভিস') || lower.includes('যার্ভিস');
             if (mention) {
                 this._enqueue(async () => {
-                    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
                     if (!await this._claimMsgLock(msgKey)) return;
+                    await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
                     await this.respondToMention(msg, isFromOwner, msgKey);
                 });
                 return;
@@ -489,8 +505,8 @@ Jarvis.watchMessages = function() {
         // Owner offline + partner sent message → reply after delay
         if (isFromPartner && !this.isOwnerActive()) {
             this._enqueue(async () => {
-                await new Promise(r => setTimeout(r, 120000 + Math.random() * 360000));
                 if (!await this._claimMsgLock(msgKey)) return;
+                await new Promise(r => setTimeout(r, 60000 + Math.random() * 120000));
                 await this.offlineReply(msg, msgKey);
             });
             return;
@@ -499,6 +515,8 @@ Jarvis.watchMessages = function() {
         // Random join (rare, 8%, 10min cooldown, 5+ msgs)
         if (Date.now() - this.lastReply > 600000 && this.contextBuffer.length >= 5 && Math.random() < 0.08) {
             this._enqueue(async () => {
+                // Use a global lock key so only one tab joins
+                if (!await this._claimMsgLock('_join')) return;
                 await new Promise(r => setTimeout(r, 8000 + Math.random() * 12000));
                 await this.joinConversation();
             });
@@ -626,7 +644,7 @@ Jarvis.sendMessage = async function(text, replyToId, replyToText) {
             messagesRef.push(data);
             this.lastReply = Date.now();
             resolve();
-        }, 800 + Math.random() * 1200);
+        }, 300 + Math.random() * 400);
     });
 };
 
@@ -640,8 +658,8 @@ Jarvis.respondToMention = async function(msg, isFromOwner, msgKey) {
             ownerState: this.getOwnerState(),
             currentUser: who
         });
-        const userMsg = `${who} dake বলেছে: "${msg.text}"\n\nJarvis reply দাও (বাংলায়, ২-৩ লাইন, বন্ধুর মতো, তুমি/আপনি ব্যবহার কর):`;
-        const reply = await jarvisCallAPI(sysPrompt, userMsg, 120);
+        const userMsg = `${who} বলেছে: "${msg.text}"\n\nJarvis reply দাও (বাংলায়, ১-২ লাইন, ছোট করে, প্রশ্ন করবে না, বন্ধুর মতো):`;
+        const reply = await jarvisCallAPI(sysPrompt, userMsg, 60);
         if (reply) await this.sendMessage(reply, msgKey, msg.text);
     } catch(e) {}
 };
@@ -655,8 +673,8 @@ Jarvis.respondToReply = async function(msg, isFromOwner, msgKey) {
             ownerStatus: this.ownerStatus,
             currentUser: who
         });
-        const userMsg = `${who} reply দিয়েছে: "${msg.text}"\n\nJarvis reply দাও (বাংলায়, ২-৩ লাইন, বন্ধুর মতো, তুমি/আপনি):`;
-        const reply = await jarvisCallAPI(sysPrompt, userMsg, 120);
+        const userMsg = `${who} reply দিয়েছে: "${msg.text}"\n\nJarvis reply দাও (বাংলায়, ১-২ লাইন, ছোট করে, প্রশ্ন করবে না, বন্ধুর মতো):`;
+        const reply = await jarvisCallAPI(sysPrompt, userMsg, 60);
         if (reply) await this.sendMessage(reply, msgKey, msg.text);
     } catch(e) {}
 };
@@ -670,8 +688,8 @@ Jarvis.directChat = async function(query, senderId) {
             contextStr: this.buildContext(8),
             currentUser: who
         });
-        const userMsg = `${who} বলেছে: "${query}"\n\nJarvis answer দাও (বাংলায়, ২-৩ লাইন, বন্ধুর মতো, তুমি/আপনি):`;
-        const reply = await jarvisCallAPI(sysPrompt, userMsg, 150);
+        const userMsg = `${who} বলেছে: "${query}"\n\nJarvis answer দাও (বাংলায়, ১-২ লাইন, ছোট করে, প্রশ্ন করবে না, বন্ধুর মতো):`;
+        const reply = await jarvisCallAPI(sysPrompt, userMsg, 80);
         if (reply) await this.sendMessage(reply);
     } catch(e) {}
 };
@@ -683,8 +701,8 @@ Jarvis.privateChat = async function(query) {
             contextStr: this.buildContext(6),
             currentUser: this.getCurrentUser()
         }) + `\n\nগুরুত্বপূর্ণ: এটা PRIVATE conversation — শুধু এই user দেখবে।`;
-        const userMsg = `Privately ask করেছে: "${query}"\n\nJarvis reply দাও (বাংলায়, বন্ধুর মতো):`;
-        const reply = await jarvisCallAPI(sysPrompt, userMsg, 150);
+        const userMsg = `Privately ask করেছে: "${query}"\n\nJarvis reply দাও (বাংলায়, ছোট করে, ১-২ লাইন, প্রশ্ন করবে না):`;
+        const reply = await jarvisCallAPI(sysPrompt, userMsg, 80);
         if (reply) {
             // Render locally only - don't push to Firebase
             const localKey = 'private_jarvis_' + Date.now();
@@ -708,8 +726,8 @@ Jarvis.offlineReply = async function(triggerMsg, msgKey) {
             ownerState: this.getOwnerState(),
             currentUser: 'Babi'
         });
-        const userMsg = `Babi বলেছে: "${triggerMsg.text || '[মিডিয়া]'}"\nErfan bhai offline.\n\nJarvis Babi কে reply দাও (বাংলায়, ২-৩ লাইন, বন্ধুর মতো, caring):`;
-        const reply = await jarvisCallAPI(sysPrompt, userMsg, 120);
+        const userMsg = `Babi বলেছে: "${triggerMsg.text || '[মিডিয়া]'}"\nErfan bhai offline.\n\nJarvis Babi কে reply দাও (বাংলায়, ১-২ লাইন, ছোট করে, প্রশ্ন করবে না, caring):`;
+        const reply = await jarvisCallAPI(sysPrompt, userMsg, 60);
         if (reply) {
             await this.sendMessage(reply, msgKey, triggerMsg.text);
             this.updateMemoryFromMsg(triggerMsg);
@@ -724,8 +742,8 @@ Jarvis.joinConversation = async function() {
         const sysPrompt = buildSystemPrompt({
             contextStr: this.buildContext(8)
         });
-        const userMsg = `Chat দেখে naturally join করো (বাংলায়, ২-৩ লাইন, বন্ধুর মতো, তুমি/আপনি):`;
-        const reply = await jarvisCallAPI(sysPrompt, userMsg, 100);
+        const userMsg = `Chat দেখে naturally join করো (বাংলায়, ১ লাইন, ছোট করে, প্রশ্ন করবে না, বন্ধুর মতো):`;
+        const reply = await jarvisCallAPI(sysPrompt, userMsg, 60);
         if (reply) await this.sendMessage(reply);
     } catch(e) {}
 };
