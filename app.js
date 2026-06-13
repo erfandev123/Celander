@@ -13,6 +13,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const messagesRef = db.ref('secret_messages');
+const profilesRef = db.ref('user_profiles');  // Store user profiles for real-time sync
 
 const gh_p1 = "ghp_Ljw60Ha08BLp10IJgkp5";
 const gh_p2 = "JjhEMIoXzM0NINnQ";
@@ -90,13 +91,40 @@ let myEmailKey = getEmailKey(myEmail);
 document.getElementById('settings-name-input').value = myName;
 document.getElementById('settings-avatar-img').src = myAvatar;
 
+// Update ONLY profile UI elements when avatar changes (NOT messages)
+function updateAllAvatars() {
+    // Sidebar - only current user's profile
+    document.getElementById('sidebar-my-avatar').src = myAvatar;
+    // Settings panel - only current user's profile
+    if (document.getElementById('settings-avatar-img')) {
+        document.getElementById('settings-avatar-img').src = myAvatar;
+    }
+    // DO NOT update message avatars - they should keep sender's original avatar
+}
+
 // Update PC Sidebars if registered
 function updatePCSidebars() {
     if (isRegistered) {
-        document.getElementById('sidebar-my-avatar').src = myAvatar;
+        updateAllAvatars();
         document.getElementById('sidebar-my-name').innerText = myName;
         document.getElementById('sidebar-my-email').innerText = myEmail;
         document.getElementById('sidebar-friend-avatar').src = friendAvatarSrc;
+    }
+}
+
+// Sync profile to Firebase in real-time
+async function syncProfileToFirebase() {
+    if (!isRegistered || !myEmailKey) return;
+    try {
+        await profilesRef.child(myEmailKey).set({
+            name: myName,
+            avatar: myAvatar,
+            email: myEmail,
+            lastUpdated: firebase.database.ServerValue.TIMESTAMP
+        });
+        console.log('[Profile Synced]', myEmailKey, myName, myAvatar);
+    } catch(e) {
+        console.error('[Profile Sync Error]', e);
     }
 }
 
@@ -218,7 +246,7 @@ document.getElementById('secret-submit').addEventListener('click', () => {
     } else { alert("Incorrect Date!"); }
 });
 
-document.getElementById('auth-submit').addEventListener('click', () => {
+document.getElementById('auth-submit').addEventListener('click', async () => {
     let name = document.getElementById('auth-name').value.trim();
     let email = document.getElementById('auth-email').value.trim();
     
@@ -235,6 +263,9 @@ document.getElementById('auth-submit').addEventListener('click', () => {
     localStorage.setItem('myEmail', myEmail);
     localStorage.setItem('myUserId', myUserId);
     localStorage.setItem('isRegistered', 'true');
+    
+    // Sync initial profile to Firebase
+    await syncProfileToFirebase();
     
     document.getElementById('settings-name-input').value = myName;
     updatePCSidebars();
@@ -376,7 +407,10 @@ document.getElementById('chat-settings-btn').addEventListener('click', () => {
 document.getElementById('settings-avatar-upload').addEventListener('change', function() {
     if(this.files[0]) {
         let reader = new FileReader();
-        reader.onload = e => { document.getElementById('settings-avatar-img').src = e.target.result; }
+        reader.onload = e => { 
+            document.getElementById('settings-avatar-img').src = e.target.result;
+            console.log('[Avatar Preview Set]', e.target.result.substring(0, 50) + '...');
+        }
         reader.readAsDataURL(this.files[0]);
     }
 });
@@ -388,11 +422,30 @@ document.getElementById('save-settings-btn').addEventListener('click', async fun
 
     const imgSrc = document.getElementById('settings-avatar-img').src;
     if(imgSrc.startsWith('data:')) {
-        try { myAvatar = await uploadToGitHub(imgSrc, 'profile'); localStorage.setItem('myAvatar', myAvatar); } 
-        catch(e) {}
+        try { 
+            myAvatar = await uploadToGitHub(imgSrc, 'profile'); 
+            localStorage.setItem('myAvatar', myAvatar);
+            updateAllAvatars();  // Immediately update all avatars in chat
+            console.log('[Avatar Updated]', myAvatar);
+        } 
+        catch(e) {
+            console.error('[Avatar Upload Error]', e);
+            btn.innerText = 'Save Profile'; 
+            return;
+        }
     }
-    btn.innerText = 'Save Profile'; 
+    
+    // Sync entire profile to Firebase for real-time updates everywhere
+    await syncProfileToFirebase();
+    
+    btn.innerText = '✅ Saved'; 
     updatePCSidebars();
+    
+    // Reset button after 2 seconds
+    setTimeout(() => {
+        btn.innerText = 'Save Profile';
+    }, 2000);
+    
     closeAllMenus();
 });
 
@@ -471,6 +524,7 @@ function initChat() {
     db.ref('.info/connected').off();
     db.ref('presence').off();
     db.ref('typing').off();
+    profilesRef.off();
     messagesRef.off();
 
     // 1. Presence tracking - set online, keep-alive, set timestamp on disconnect
@@ -504,6 +558,33 @@ function initChat() {
     // Refresh "X min ago" display every minute
     setInterval(() => { if (!currentFriendPresence.isOnline && currentFriendPresence.lastSeen) updatePresenceUI(); }, 60000);
 
+    // 2b. Listen to Friend Profile Changes in real-time
+    profilesRef.on('value', snap => {
+        snap.forEach(child => {
+            if (child.key !== userIdentifier) {
+                const profile = child.val();
+                if (profile && profile.avatar && profile.avatar !== friendAvatarSrc) {
+                    console.log('[Friend Avatar Updated]', profile.name, profile.avatar);
+                    friendAvatarSrc = profile.avatar;
+                    // Update friend's avatars in UI (header & sidebar only)
+                    document.getElementById('friend-avatar-header').src = friendAvatarSrc;
+                    document.getElementById('sidebar-friend-avatar').src = friendAvatarSrc;
+                    // Update ONLY incoming messages (from friend) - NOT outgoing messages
+                    document.querySelectorAll('.msg-wrapper.in .msg-avatar').forEach(img => {
+                        img.src = friendAvatarSrc;
+                    });
+                }
+                if (profile && profile.name) {
+                    const currentHeader = document.getElementById('friend-name-header').innerText;
+                    if (profile.name !== currentHeader && currentHeader !== 'Friend') {
+                        document.getElementById('friend-name-header').innerText = profile.name;
+                        document.getElementById('sidebar-friend-name').innerText = profile.name;
+                    }
+                }
+            }
+        });
+    });
+
     db.ref('typing').on('value', snap => {
         window.isFriendTyping = false;
         window.isJarvisTyping = false;
@@ -531,7 +612,13 @@ function initChat() {
                 const friendName = m.val.senderName || "Friend";
                 document.getElementById('friend-name-header').innerText = friendName;
                 document.getElementById('sidebar-friend-name').innerText = friendName;
-                if(m.val.senderAvatar) { friendAvatarSrc = m.val.senderAvatar; document.getElementById('friend-avatar-header').src = friendAvatarSrc; document.getElementById('sidebar-friend-avatar').src = friendAvatarSrc; }
+                if(m.val.senderAvatar) { 
+                    friendAvatarSrc = m.val.senderAvatar; 
+                    document.getElementById('friend-avatar-header').src = friendAvatarSrc; 
+                    document.getElementById('sidebar-friend-avatar').src = friendAvatarSrc;
+                    // Only update incoming messages (from friend), not outgoing messages (mine)
+                    document.querySelectorAll('.msg-wrapper.in .msg-avatar').forEach(img => img.src = friendAvatarSrc);
+                }
             }
         });
         initialLoad = false;
@@ -546,7 +633,13 @@ function initChat() {
                 const friendName = msg.senderName || "Friend";
                 document.getElementById('friend-name-header').innerText = friendName;
                 document.getElementById('sidebar-friend-name').innerText = friendName;
-                if(msg.senderAvatar) { friendAvatarSrc = msg.senderAvatar; document.getElementById('friend-avatar-header').src = friendAvatarSrc; document.getElementById('sidebar-friend-avatar').src = friendAvatarSrc; document.querySelectorAll('.msg-avatar').forEach(img => img.src = friendAvatarSrc); }
+                if(msg.senderAvatar) { 
+                    friendAvatarSrc = msg.senderAvatar; 
+                    document.getElementById('friend-avatar-header').src = friendAvatarSrc; 
+                    document.getElementById('sidebar-friend-avatar').src = friendAvatarSrc; 
+                    // Only update incoming messages (from friend), not outgoing messages (mine)
+                    document.querySelectorAll('.msg-wrapper.in .msg-avatar').forEach(img => img.src = friendAvatarSrc);
+                }
                 // Notification + Sound for new messages
                 if (msg.senderId !== AI_ID && msg.type !== 'ai') {
                     // Background notification (owner only)
