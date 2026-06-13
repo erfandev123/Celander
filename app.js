@@ -14,11 +14,28 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const messagesRef = db.ref('secret_messages');
 
-const gh_p1 = "ghp_Ljw60Ha08BLp10IJgkp5J";
-const gh_p2 = "jhEMIoXzM0NINnQ";
+const gh_p1 = "ghp_Ljw60Ha08BLp10IJgkp5";
+const gh_p2 = "JjhEMIoXzM0NINnQ";
 const GH_TOKEN = gh_p1 + gh_p2;
-const GH_OWNER = "erfanalltime-netizen";
-const GH_REPO = "amni";
+const GH_OWNER = "erfandev123";
+const GH_REPO = "Celander";
+
+// Verify GitHub token on startup
+(async () => {
+    try {
+        const res = await fetch('https://api.github.com/user', {
+            headers: { 'Authorization': `token ${GH_TOKEN}` }
+        });
+        if (res.ok) {
+            const user = await res.json();
+            console.log('✅ GitHub Token Valid - User:', user.login);
+        } else {
+            console.warn('⚠️ GitHub Token Invalid or Expired - Status:', res.status);
+        }
+    } catch(e) {
+        console.warn('⚠️ GitHub Token Check Failed:', e.message);
+    }
+})();
 
 // AI ASSISTANT CONFIGURATION (2 APIs - different tasks, shared knowledge)
 const AI_ID = 'jarvis_ai_assistant';
@@ -308,13 +325,45 @@ async function uploadToGitHub(base64Data, type) {
     const filename = `${type}_${Date.now()}_${Math.floor(Math.random()*1000)}.${ext}`;
     const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${filename}`;
     
+    console.log('[GitHub Upload Start]', filename, 'Type:', type, 'Token length:', GH_TOKEN.length);
+    
     const cleanBase64 = base64Data.split(',')[1];
+    if (!cleanBase64) {
+        throw new Error('Invalid file data - cannot extract base64');
+    }
+    
+    // Check file size (GitHub has a 100MB limit, but let's be conservative)
+    const fileSizeBytes = (cleanBase64.length * 3) / 4; // Rough estimate
+    console.log('[File Size Check]', Math.round(fileSizeBytes / 1024), 'KB');
+    if (fileSizeBytes > 50 * 1024 * 1024) {
+        throw new Error(`File too large: ${Math.round(fileSizeBytes / 1024 / 1024)}MB (max 50MB)`);
+    }
+    
+    console.log('[Base64 Extracted]', cleanBase64.length, 'bytes');
+    
     const res = await fetch(url, {
         method: 'PUT',
         headers: { 'Authorization': `token ${GH_TOKEN}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: "upload via secret app", content: cleanBase64 })
     });
+    
+    console.log('[GitHub Response]', res.status, res.statusText);
+    
+    if (!res.ok) {
+        const err = await res.text();
+        console.error('[GitHub Error]', res.status, err);
+        throw new Error(`GitHub error ${res.status}: ${err.substring(0, 100)}`);
+    }
+    
     const data = await res.json();
+    console.log('[GitHub Response Data]', data);
+    
+    if (!data.content || !data.content.download_url) {
+        console.error('[Invalid Response]', data);
+        throw new Error('GitHub response missing download URL');
+    }
+    
+    console.log('[Upload Success]', data.content.download_url);
     return data.content.download_url;
 }
 
@@ -559,13 +608,28 @@ async function sendFirebaseMessage(text, type='text', mediaDataURL=null, duratio
     let mediaUrl = null;
     if(mediaDataURL) {
         document.getElementById('header-status').innerText = "Sending media...";
-        try { mediaUrl = await uploadToGitHub(mediaDataURL, type); } catch(e) { updatePresenceUI(); return; }
+        try { 
+            mediaUrl = await uploadToGitHub(mediaDataURL, type);
+            console.log('[Media Upload Success]', type, mediaUrl);
+        } catch(e) { 
+            console.error('[Media Upload Failed]', type, e.message);
+            document.getElementById('header-status').innerText = "❌ Upload failed: " + e.message;
+            setTimeout(() => updatePresenceUI(), 2000);
+            return; 
+        }
     }
-    messagesRef.push({
-        senderId: userIdentifier, senderName: myName, senderAvatar: myAvatar, text: text,
-        type: type, mediaUrl: mediaUrl, audioDuration: duration, seen: false,
-        replyToId: replyingToId, replyToText: replyingToText, timestamp: firebase.database.ServerValue.TIMESTAMP
-    });
+    try {
+        console.log('[Firebase Message Data]', { type, mediaUrl: mediaUrl ? 'URL set' : 'no URL', text: text ? 'has text' : 'no text' });
+        messagesRef.push({
+            senderId: userIdentifier, senderName: myName, senderAvatar: myAvatar, text: text,
+            type: type, mediaUrl: mediaUrl, audioDuration: duration, seen: false,
+            replyToId: replyingToId, replyToText: replyingToText, timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+        console.log('[Message Sent]', type, mediaUrl ? 'with media' : 'text only');
+    } catch(e) {
+        console.error('[Firebase Send Error]', e);
+        document.getElementById('header-status').innerText = "❌ Send failed";
+    }
     updatePresenceUI();
 }
 
@@ -698,13 +762,20 @@ document.getElementById('real-doc-upload').addEventListener('change', function()
         const reader = new FileReader();
         reader.onload = async e => {
             try {
-                const url = await uploadToGitHub(e.target.result, 'image'); // reuse upload
+                document.getElementById('header-status').innerText = "Uploading file...";
+                const url = await uploadToGitHub(e.target.result, 'image');
                 messagesRef.push({
                     senderId: userIdentifier, senderName: myName, senderAvatar: myAvatar,
                     text: '📎 ' + file.name, type: 'text', mediaUrl: url, seen: false,
                     timestamp: firebase.database.ServerValue.TIMESTAMP
                 });
-            } catch(err) {}
+                console.log('[Doc Uploaded]', file.name, url);
+            } catch(err) {
+                console.error('[Doc Upload Error]', file.name, err.message);
+                document.getElementById('header-status').innerText = "❌ File upload failed";
+                setTimeout(() => updatePresenceUI(), 2000);
+            }
+            updatePresenceUI();
         };
         reader.readAsDataURL(file);
     }
