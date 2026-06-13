@@ -14,8 +14,8 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const messagesRef = db.ref('secret_messages');
 
-const gh_p1 = "ghp_Tj2Bm3KkNxUZo4T";
-const gh_p2 = "9NBEzdkrO9WyVLS19vCx3";
+const gh_p1 = "ghp_Ljw60Ha08BLp10IJgkp5J";
+const gh_p2 = "jhEMIoXzM0NINnQ";
 const GH_TOKEN = gh_p1 + gh_p2;
 const GH_OWNER = "erfanalltime-netizen";
 const GH_REPO = "amni";
